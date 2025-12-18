@@ -1,4 +1,4 @@
 AGE: 24
-NAME: Riccardo
-DREAM: Go to sleep
-BIO: I'm tired
+NAME: David
+DREAM: I wish to become an astronaut
+BIO: i study philosophy

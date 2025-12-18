@@ -8,6 +8,7 @@ import threading
 import time
 from google import genai
 
+# --- CONFIGURAZIONE CHIAVE ---
 GEMINI_API_KEY = "AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A"
 
 class LifeOfChuckApp:
@@ -18,7 +19,10 @@ class LifeOfChuckApp:
         self.root.configure(bg="black")
         
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.bg_folder = os.path.abspath(os.path.join(script_dir, "..", "bg_frames"))
+
+        parent_dir = os.path.dirname(script_dir)
+
+        self.bg_folder = os.path.join(parent_dir, "bg_frames")
         
         self.bg_frames = []
         self.current_frame = 0
@@ -72,6 +76,15 @@ class LifeOfChuckApp:
     def fetch_gemini_bio(self, callback):
         def run():
             try:
+                # Setup target directory paths
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                parent_dir = os.path.dirname(script_dir) # Go up to the root project folder
+                target_dir = os.path.join(parent_dir, "life-of-chuck-aging", "Futures")
+                
+                # Ensure the 'futures' folder exists
+                if not os.path.exists(target_dir):
+                    os.makedirs(target_dir)
+
                 with open("user_data.txt", "r", encoding="utf-8") as f:
                     data = f.read()
                 
@@ -81,7 +94,6 @@ class LifeOfChuckApp:
                 
                 client = genai.Client(api_key=GEMINI_API_KEY)
                 
-                # PROMPT: Focus su lunghezza minima e virgola dopo ogni parola
                 prompt = f"""
                 Dati Utente: {data}
                 Età attuale: {current_age}
@@ -92,14 +104,10 @@ class LifeOfChuckApp:
                 Dividi in blocchi decennali: [AGE X], [AGE Y]... e [DEATH].
 
                 REGOLE MANDATORIE:
-                1. Ogni blocco deve contenere una narrazione di ALMENO 150 PAROLE. Sii estremamente descrittivo riguardo al lavoro e al raggiungimento dei sogni.
-                2. Ogni singola parola deve essere seguita da una virgola (esempio: Il, successo, arriva, dopo, anni, di, fatica,).
+                1. Ogni blocco deve contenere una narrazione di ALMENO 150 PAROLE.
+                2. Ogni singola parola deve essere seguita da una virgola.
                 3. Non usare punti fermi, usa solo virgole dopo ogni parola.
-                4. Focus: Evoluzione professionale, traguardi del sogno, collaborazioni, impatto nel settore. No descrizioni fisiche.
-                5. Lingua: Inglese.
-                6. Tieni a questo punto unicamente le parole chiave della biografia più soignificative
-                
-                IMPORTANTE: Se la narrazione di un blocco è inferiore alle 150 parole, espandi i dettagli lavorativi e i pensieri della persona.
+                4. Lingua: Inglese.
                 """
                 
                 response = client.models.generate_content(
@@ -110,10 +118,10 @@ class LifeOfChuckApp:
                 if response.text:
                     full_story = response.text
                     
-                    # Pulizia file precedenti
-                    for f_old in os.listdir("."):
+                    # Clean old files in the target directory
+                    for f_old in os.listdir(target_dir):
                         if f_old.startswith("future_") and f_old.endswith(".txt"):
-                            os.remove(f_old)
+                            os.remove(os.path.join(target_dir, f_old))
 
                     parts = full_story.split('[')
                     for part in parts:
@@ -122,10 +130,11 @@ class LifeOfChuckApp:
                             clean_header = header.strip().lower().replace(' ', '_')
                             filename = f"future_{clean_header}.txt"
                             
-                            # Rimuoviamo eventuali righe vuote e puliamo lo spazio finale
+                            # Save to the specific futures path
+                            file_path = os.path.join(target_dir, filename)
                             text_content = content.strip()
                             
-                            with open(filename, "w", encoding="utf-8") as f:
+                            with open(file_path, "w", encoding="utf-8") as f:
                                 f.write(text_content)
                     
                     msg = "Your journey is about to unfold."
@@ -134,7 +143,7 @@ class LifeOfChuckApp:
 
             except Exception as e:
                 print(f"Errore AI: {e}")
-                self.emergency_save()
+                self.emergency_save() # You should update this method path too!
                 msg = "Destiny generated (offline mode)."
             
             self.root.after(0, lambda: callback(msg))
@@ -203,6 +212,7 @@ class CameraPage(PageWithBackground):
             self.controller.captured_image = frame
             self.btn_capture.grid_remove()
             
+            # Pulsanti di conferma originali
             retake_style = BUTTON_STYLE.copy()
             retake_style.update({"width": 12, "bg": "#444", "fg": "white", "text": "RETAKE"})
             confirm_style = BUTTON_STYLE.copy()
@@ -220,7 +230,7 @@ class CameraPage(PageWithBackground):
 
     def confirm(self):
         cv2.imwrite("chuck_origin.jpg", self.controller.captured_image)
-        self.controller.show_page("AgePage") 
+        self.controller.show_page("AgePage") # Changed from NamePage to AgePage
 
 class QuestionBase(PageWithBackground):
     def __init__(self, parent, controller, question_text, key, next_page):
@@ -248,9 +258,8 @@ class AgePage(QuestionBase):
         # Call face aging as soon as age is inserted
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            aging_dir = os.path.abspath(os.path.join(script_dir, "..", "life-of-chuck-aging"))
-            aging_script = os.path.join(aging_dir, "main.py")
-            subprocess.Popen(["python", aging_script, "chuck_origin.jpg", age_val], cwd=aging_dir)
+            aging_script = os.path.abspath(os.path.join(script_dir, "..", "life-of-chuck-aging", "main.py"))
+            subprocess.Popen(["python", aging_script, "chuck_origin.jpg", age_val])
         except Exception as e:
             print(f"Errore lancio aging: {e}")
             

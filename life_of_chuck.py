@@ -219,7 +219,7 @@ class CameraPage(PageWithBackground):
         self.start_webcam()
 
     def confirm(self):
-        cv2.imwrite("chuck_origin.jpg", self.controller.captured_image)
+        cv2.imwrite("life-of-chuck-aging/chuck_origin.jpg", self.controller.captured_image)
         self.controller.show_page("AgePage") 
 
 class QuestionBase(PageWithBackground):
@@ -248,7 +248,7 @@ class AgePage(QuestionBase):
         # Call face aging as soon as age is inserted
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            aging_script = os.path.abspath(os.path.join(script_dir, "..", "life-of-chuck-aging", "main.py"))
+            aging_script = os.path.abspath(os.path.join(script_dir, "..", "CPAC-Hackaton/life-of-chuck-aging", "main.py"))
             subprocess.Popen(["python", aging_script, "chuck_origin.jpg", age_val])
         except Exception as e:
             print(f"Errore lancio aging: {e}")

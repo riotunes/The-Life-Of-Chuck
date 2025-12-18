@@ -56,7 +56,7 @@ def run_pipeline():
     print()
     
     # Step 1: Capture face
-    print("[STEP 1/3] CAMERA CAPTURE")
+    '''print("[STEP 1/3] CAMERA CAPTURE")
     print("-" * 40)
     captured_image = capture_face(output_dir=CAPTURES_DIR)
     
@@ -65,7 +65,7 @@ def run_pipeline():
         sys.exit(1)
     
     print(f"\nCaptured: {captured_image}")
-    print()
+    print()'''
     
     # Step 2: Get age and generate progression
     print("[STEP 2/3] AGE PROGRESSION")
@@ -86,7 +86,7 @@ def run_pipeline():
     print()
     
     aged_images = generate_age_progression(
-        input_image_path=captured_image,
+        input_image_path="chuck_origin.jpg",
         current_age=current_age,
         output_dir=AGED_DIR,
         age_increment=age_increment,

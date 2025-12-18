@@ -170,7 +170,9 @@ if __name__ == "__main__":
     
     # Get current age from user
     try:
-        current_age = int(input("Enter your current age: "))
+        with open('user_data.txt', 'r') as f:
+            content = f.read().strip()
+        current_age = int(content.split(':')[1].strip())
     except ValueError:
         print("Invalid age entered")
         sys.exit(1)

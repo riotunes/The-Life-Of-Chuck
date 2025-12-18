@@ -67,17 +67,18 @@ def _check_and_send_start():
     """Internal: Check if both done, and send OSC start if so."""
     if both_complete():
         print("[Coordinator] Both processes complete! Sending OSC start...")
-        _send_osc_start()
+        _send_osc_start(msg=0)
+        _send_osc_start(msg=1)
         _cleanup_flags()
 
 
-def _send_osc_start(ip="127.0.0.1", port=9000):
+def _send_osc_start(ip="127.0.0.1", port=9000, msg=None):
     """Send the OSC 'start' message to TouchDesigner."""
     try:
         from pythonosc import udp_client
 
         client = udp_client.SimpleUDPClient(ip, port)
-        client.send_message("/touchdesigner/start", 1)
+        client.send_message("/touchdesigner/start", msg)
 
         print(f"[Coordinator] OSC sent: /touchdesigner/start -> {ip}:{port}")
         return True

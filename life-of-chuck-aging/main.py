@@ -22,6 +22,7 @@ if not os.environ.get("GEMINI_API_KEY"):
 from camera_capture import capture_face
 from face_aging import generate_age_progression
 from camera_to_uv import convert_images_to_uv
+from osc_sender import send_pipeline_complete, send_with_metadata
 
 
 # Output directories
@@ -116,6 +117,7 @@ def run_pipeline():
     print()
     
     # Summary
+    # Summary
     print("=" * 50)
     print("   PIPELINE COMPLETE")
     print("=" * 50)
@@ -127,6 +129,21 @@ def run_pipeline():
     print("Generated files:")
     for uv_path in uv_textures:
         print(f"  - {uv_path}")
+    print()
+    
+    # Send OSC notification to TouchDesigner
+    print("[OSC] Notifying TouchDesigner...")
+    print("-" * 40)
+    
+    # Simple version - just send completion flag
+    # send_pipeline_complete(ip="127.0.0.1", port=9000)
+    
+    # Or with metadata - sends both completion flag and texture count
+    send_with_metadata(
+        ip="127.0.0.1",
+        port=9000,
+        num_textures=len(uv_textures)
+    )
     print()
 
 

@@ -1,0 +1,4 @@
+NAME: david
+AGE: 13
+DREAM: i want to be an actor
+BIO: i study in middle school

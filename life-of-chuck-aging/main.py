@@ -143,13 +143,10 @@ def run_pipeline():
     # send_pipeline_complete(ip="127.0.0.1", port=9000)
     
     # Or with metadata - sends both completion flag and texture count
-    send_with_metadata(
-        ip="127.0.0.1",
-        port=9000,
-        num_textures=len(uv_textures)
-    )
-    print()
+    
 
+    # Signal to coordinator that pipeline is complete
+    signal_pipeline_complete()
 
 
 if __name__ == "__main__":

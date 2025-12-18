@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
 import os
+import subprocess
 
 class LifeOfChuckApp:
     def __init__(self, root):
@@ -133,7 +134,16 @@ class CameraPage(PageWithBackground):
         self.start_webcam()
 
     def confirm(self):
-        cv2.imwrite("chuck_origin.jpg", self.controller.captured_image)
+        # 1. Salviamo la foto scattata
+        file_path = "chuck_origin.jpg"
+        cv2.imwrite(file_path, self.controller.captured_image)
+        
+        try:
+            subprocess.Popen(["python", "face_aging.py", file_path])
+            print(f"Avviato face_aging.py con l'immagine {file_path}")
+        except Exception as e:
+            print(f"Errore nell'avvio dello script face_aging.py: {e}")
+
         self.controller.show_page("NamePage")
 
 # --- QUESTION PAGES ---

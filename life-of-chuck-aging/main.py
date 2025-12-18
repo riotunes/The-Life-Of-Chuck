@@ -150,8 +150,6 @@ def run_pipeline():
     )
     print()
 
-    # Signal to coordinator that pipeline is complete
-    signal_pipeline_complete()
 
 
 if __name__ == "__main__":

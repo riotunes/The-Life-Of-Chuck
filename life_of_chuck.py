@@ -19,7 +19,7 @@ class LifeOfChuckApp:
         self.root.configure(bg="black")
         
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.bg_folder = os.path.abspath(os.path.join(script_dir, "..", "bg_frames"))
+        self.bg_folder = os.path.abspath(os.path.join(script_dir, "bg_frames"))
         
         self.bg_frames = []
         self.current_frame = 0
@@ -73,9 +73,18 @@ class LifeOfChuckApp:
     def fetch_gemini_bio(self, callback):
         def run():
             try:
+                # Setup target directory paths
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                parent_dir = os.path.dirname(script_dir) # Go up to the root project folder
+                target_dir = os.path.join(parent_dir, "futures_texts")
+                
+                # Ensure the 'futures' folder exists
+                if not os.path.exists(target_dir):
+                    os.makedirs(target_dir)
+
                 with open("user_data.txt", "r", encoding="utf-8") as f:
                     data = f.read()
-                
+                    
                 import re
                 age_match = re.search(r"AGE: (\d+)", data)
                 current_age = int(age_match.group(1)) if age_match else 30

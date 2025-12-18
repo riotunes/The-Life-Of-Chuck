@@ -32,7 +32,7 @@ class LifeOfChuckApp:
         self.container.pack(fill="both", expand=True)
         
         self.pages = {}
-        page_list = (StartPage, CameraPage, NamePage, AgePage, DreamPage, BioPage, EndPage)
+        page_list = (StartPage, CameraPage, AgePage , NamePage, DreamPage, BioPage, EndPage)
         
         for PageClass in page_list:
             page_name = PageClass.__name__
@@ -74,36 +74,34 @@ class LifeOfChuckApp:
         def run():
             try:
                 with open("user_data.txt", "r", encoding="utf-8") as f:
-                    user_info = f.read()
+                    data = f.read()
                 
-                # Ensure the client is initialized correctly
-                # Sostituisci la parte del client con questa:
-                client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1'})
-                for m in client.models.list():
-                    print(f"Modello disponibile: {m.name}")
+                import re
+                age_match = re.search(r"AGE: (\d+)", data)
+                current_age = int(age_match.group(1)) if age_match else 30
                 
+                client = genai.Client(api_key=GEMINI_API_KEY)
                 
+                # PROMPT: Focus su lunghezza minima e virgola dopo ogni parola
                 prompt = f"""
-                            Agisci come un biografo profetico. Basandoti su questi dati: {user_info}, scrivi una biografia futura divisa esattamente in 4 blocchi.
-                            Ogni blocco deve iniziare con il tag specifico, seguito da una descrizione di circa 40-50 parole.
+                Dati Utente: {data}
+                Età attuale: {current_age}
+                
+                OBIETTIVO:
+                Scrivi una biografia futura narrativa, logica e molto dettagliata. 
+                Decidi tu l'età del decesso (longevità casuale).
+                Dividi in blocchi decennali: [AGE X], [AGE Y]... e [DEATH].
 
-                            REGOLE RIGIDE:
-                            1. Usa uno stile cinematografico e visivo (adatto per generazione immagini/stream diffusion).
-                            2. Non usare introduzioni o conclusioni, scrivi solo i blocchi.
-                            3. Rispetta esattamente questo formato:
-
-                            [AGE 37]
-                            (Descrizione della vita a 37 anni, successi e aspetto visivo)
-
-                            [AGE 52]
-                            (Descrizione della vita a 52 anni, saggezza e ambiente circostante)
-
-                            [AGE 80]
-                            (Descrizione della vita a 80 anni, riflessione e lascito)
-
-                            [DEATH]
-                            (Una chiusura poetica e visiva sull'eredità lasciata al mondo)
-                            """
+                REGOLE MANDATORIE:
+                1. Ogni blocco deve contenere una narrazione di ALMENO 150 PAROLE. Sii estremamente descrittivo riguardo al lavoro e al raggiungimento dei sogni.
+                2. Ogni singola parola deve essere seguita da una virgola (esempio: Il, successo, arriva, dopo, anni, di, fatica,).
+                3. Non usare punti fermi, usa solo virgole dopo ogni parola.
+                4. Focus: Evoluzione professionale, traguardi del sogno, collaborazioni, impatto nel settore. No descrizioni fisiche.
+                5. Lingua: Inglese.
+                6. Tieni a questo punto unicamente le parole chiave della biografia più soignificative
+                
+                IMPORTANTE: Se la narrazione di un blocco è inferiore alle 150 parole, espandi i dettagli lavorativi e i pensieri della persona.
+                """
                 
                 response = client.models.generate_content(
                     model="gemini-2.0-flash", 
@@ -112,22 +110,33 @@ class LifeOfChuckApp:
                 
                 if response.text:
                     full_story = response.text
-                    # ... rest of your splitting logic ...
+                    
+                    # Pulizia file precedenti
+                    for f_old in os.listdir("."):
+                        if f_old.startswith("future_") and f_old.endswith(".txt"):
+                            os.remove(f_old)
+
                     parts = full_story.split('[')
                     for part in parts:
                         if ']' in part:
                             header, content = part.split(']', 1)
-                            filename = f"future_{header.strip().lower().replace(' ', '_')}.txt"
+                            clean_header = header.strip().lower().replace(' ', '_')
+                            filename = f"future_{clean_header}.txt"
+                            
+                            # Rimuoviamo eventuali righe vuote e puliamo lo spazio finale
+                            text_content = content.strip()
+                            
                             with open(filename, "w", encoding="utf-8") as f:
-                                f.write(content.strip())
-                    msg = "Destino scritto nelle stelle!"
+                                f.write(text_content)
+                    
+                    msg = "Your journey is about to unfold."
                 else:
                     raise Exception("Risposta AI vuota")
 
             except Exception as e:
                 print(f"Errore AI: {e}")
                 self.emergency_save()
-                msg = "Destino generato (Modalità Offline)."
+                msg = "Destiny generated (offline mode)."
             
             self.root.after(0, lambda: callback(msg))
 
@@ -213,13 +222,7 @@ class CameraPage(PageWithBackground):
 
     def confirm(self):
         cv2.imwrite("chuck_origin.jpg", self.controller.captured_image)
-        try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            aging_script = os.path.abspath(os.path.join(script_dir, "..", "face_aging.py"))
-            subprocess.Popen(["python", aging_script, "chuck_origin.jpg"])
-        except Exception as e:
-            print(f"Errore lancio aging: {e}")
-        self.controller.show_page("NamePage")
+        self.controller.show_page("AgePage") # Changed from NamePage to AgePage
 
 class QuestionBase(PageWithBackground):
     def __init__(self, parent, controller, question_text, key, next_page):
@@ -235,10 +238,29 @@ class QuestionBase(PageWithBackground):
             f.write(f"{self.key.upper()}: {self.entry.get()}\n")
         self.controller.show_page(self.next_page)
 
-class NamePage(QuestionBase):
-    def __init__(self, parent, controller): super().__init__(parent, controller, "What is your name?", "name", "AgePage")
 class AgePage(QuestionBase):
-    def __init__(self, parent, controller): super().__init__(parent, controller, "How old are you?", "age", "DreamPage")
+    def __init__(self, parent, controller): 
+        super().__init__(parent, controller, "How old are you?", "age", "NamePage")
+
+    def save_and_next(self):
+        age_val = self.entry.get()
+        with open("user_data.txt", "a", encoding="utf-8") as f:
+            f.write(f"AGE: {age_val}\n")
+        
+        # Call face aging as soon as age is inserted
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            aging_script = os.path.abspath(os.path.join(script_dir, "..", "face_aging.py"))
+            # Passing the age as an argument if your face_aging.py supports it
+            subprocess.Popen(["python", aging_script, "chuck_origin.jpg", age_val])
+        except Exception as e:
+            print(f"Errore lancio aging: {e}")
+            
+        self.controller.show_page(self.next_page)
+
+class NamePage(QuestionBase):
+    def __init__(self, parent, controller): 
+        super().__init__(parent, controller, "What is your name?", "name", "DreamPage")
 class DreamPage(QuestionBase):
     def __init__(self, parent, controller): super().__init__(parent, controller, "What is your greatest dream?", "dream", "BioPage")
 class BioPage(QuestionBase):
@@ -247,7 +269,7 @@ class BioPage(QuestionBase):
 class EndPage(PageWithBackground):
     def __init__(self, parent, controller):
         super().__init__(parent, controller)
-        self.status_label = self.canvas.create_text(500, 400, text="Interrogando il tempo...", font=TITLE_FONT, fill="white")
+        self.status_label = self.canvas.create_text(500, 400, text="Looking at your path among the stars", font=TITLE_FONT, fill="white")
 
     def generate_future_timeline(self):
         self.controller.fetch_gemini_bio(self.on_complete)

@@ -6,11 +6,10 @@ import os
 import subprocess
 import threading
 import time
-from openai import OpenAI
+from google import genai
 
 # --- CONFIGURAZIONE CHIAVE ---
-# Usa la tua chiave sk-proj...
-OPENAI_API_KEY = "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"
+GEMINI_API_KEY = "AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A"
 
 class LifeOfChuckApp:
     def __init__(self, root):
@@ -52,7 +51,8 @@ class LifeOfChuckApp:
                     img = Image.open(os.path.join(self.bg_folder, f))
                     img = img.resize((1000, 800), Image.Resampling.LANCZOS)
                     self.bg_frames.append(ImageTk.PhotoImage(img))
-                except: continue
+                except:
+                    continue
 
     def animate_background(self):
         if self.bg_frames:
@@ -60,63 +60,91 @@ class LifeOfChuckApp:
             for page in self.pages.values():
                 page.canvas.itemconfig(page.bg_image_item, image=next_img)
             self.current_frame = (self.current_frame + 1) % len(self.bg_frames)
-        self.root.after(120, self.animate_background) 
+        self.root.after(120, self.animate_background)
 
     def show_page(self, page_name):
         frame = self.pages[page_name]
         frame.tkraise()
-        if page_name == "CameraPage": frame.start_webcam()
-        if page_name == "EndPage": frame.generate_future_timeline()
+        if page_name == "CameraPage":
+            frame.start_webcam()
+        if page_name == "EndPage":
+            frame.generate_future_timeline()
 
-    def fetch_openai_bio(self, callback):
-        """Metodo di generazione con Debug Error"""
+    def fetch_gemini_bio(self, callback):
         def run():
             try:
-                if not os.path.exists("user_data.txt"):
-                    with open("user_data.txt", "w") as f: f.write("NAME: Chuck\nAGE: 30\n")
-
                 with open("user_data.txt", "r", encoding="utf-8") as f:
                     user_info = f.read()
                 
-                print(">>> Tentativo chiamata OpenAI...")
-                client = OpenAI(api_key=OPENAI_API_KEY)
+                # Ensure the client is initialized correctly
+                # Sostituisci la parte del client con questa:
+                client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1'})
+                for m in client.models.list():
+                    print(f"Modello disponibile: {m.name}")
                 
-                response = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "Sei un biografo futurista. Scrivi minimo 100 parole."},
-                        {"role": "user", "content": f"Dati: {user_info}. Genera bio con tag: [AGE 40], [AGE 60], [AGE 80], [DEATH]."}
-                    ]
+                
+                prompt = f"""
+                            Agisci come un biografo profetico. Basandoti su questi dati: {user_info}, scrivi una biografia futura divisa esattamente in 4 blocchi.
+                            Ogni blocco deve iniziare con il tag specifico, seguito da una descrizione di circa 40-50 parole.
+
+                            REGOLE RIGIDE:
+                            1. Usa uno stile cinematografico e visivo (adatto per generazione immagini/stream diffusion).
+                            2. Non usare introduzioni o conclusioni, scrivi solo i blocchi.
+                            3. Rispetta esattamente questo formato:
+
+                            [AGE 37]
+                            (Descrizione della vita a 37 anni, successi e aspetto visivo)
+
+                            [AGE 52]
+                            (Descrizione della vita a 52 anni, saggezza e ambiente circostante)
+
+                            [AGE 80]
+                            (Descrizione della vita a 80 anni, riflessione e lascito)
+
+                            [DEATH]
+                            (Una chiusura poetica e visiva sull'eredità lasciata al mondo)
+                            """
+                
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash", 
+                    contents=prompt
                 )
                 
-                full_story = response.choices[0].message.content
-                print(">>> Risposta ricevuta!")
+                if response.text:
+                    full_story = response.text
+                    # ... rest of your splitting logic ...
+                    parts = full_story.split('[')
+                    for part in parts:
+                        if ']' in part:
+                            header, content = part.split(']', 1)
+                            filename = f"future_{header.strip().lower().replace(' ', '_')}.txt"
+                            with open(filename, "w", encoding="utf-8") as f:
+                                f.write(content.strip())
+                    msg = "Destino scritto nelle stelle!"
+                else:
+                    raise Exception("Risposta AI vuota")
 
-                parts = full_story.split('[')
-                for part in parts:
-                    if ']' in part:
-                        header, content = part.split(']', 1)
-                        filename = f"future_{header.strip().lower().replace(' ', '_')}.txt"
-                        with open(filename, "w", encoding="utf-8") as f:
-                            f.write(content.strip())
-                
-                msg = "Destino scritto da OpenAI!"
             except Exception as e:
-                # GUARDA QUI NEL TERMINALE PER L'ERRORE
-                print(f"\n!!! ERRORE CRITICO OPENAI: {e}\n")
+                print(f"Errore AI: {e}")
                 self.emergency_save()
-                msg = "Stelle silenziose (Offline Mode)."
+                msg = "Destino generato (Modalità Offline)."
             
             self.root.after(0, lambda: callback(msg))
 
         threading.Thread(target=run, daemon=True).start()
 
     def emergency_save(self):
-        backup = {"future_age_40.txt": "Successo.", "future_age_60.txt": "Viaggi.", "future_age_80.txt": "Pace.", "future_death.txt": "Eredità."}
+        backup = {
+            "future_age_40.txt": "Un periodo di grande successo.",
+            "future_age_60.txt": "La saggezza ti guida.",
+            "future_age_80.txt": "Circondato dall'affetto.",
+            "future_death.txt": "Un lascito di ispirazione."
+        }
         for name, text in backup.items():
-            with open(name, "w", encoding="utf-8") as f: f.write(text)
+            with open(name, "w", encoding="utf-8") as f:
+                f.write(text)
 
-# --- STYLING ---
+# --- STYLING (COSI' COME TI PIACE) ---
 TITLE_FONT = ("Georgia", 38, "italic")
 ENTRY_FONT = ("Georgia", 22)
 BUTTON_STYLE = {"font": ("Georgia", 11, "bold"), "width": 25, "height": 2, "bg": "white", "fg": "black", "relief": "flat"}
@@ -166,8 +194,15 @@ class CameraPage(PageWithBackground):
             self.is_previewing = True
             self.controller.captured_image = frame
             self.btn_capture.grid_remove()
-            tk.Button(self.btn_frame, text="RETAKE", **{**BUTTON_STYLE, "width": 12}, bg="#444", fg="white", command=self.retake).grid(row=0, column=0, padx=10)
-            tk.Button(self.btn_frame, text="CONFIRM", **{**BUTTON_STYLE, "width": 12}, command=self.confirm).grid(row=0, column=1, padx=10)
+            
+            # Pulsanti di conferma originali
+            retake_style = BUTTON_STYLE.copy()
+            retake_style.update({"width": 12, "bg": "#444", "fg": "white", "text": "RETAKE"})
+            confirm_style = BUTTON_STYLE.copy()
+            confirm_style.update({"width": 12, "text": "CONFIRM"})
+            
+            tk.Button(self.btn_frame, **retake_style, command=self.retake).grid(row=0, column=0, padx=10)
+            tk.Button(self.btn_frame, **confirm_style, command=self.confirm).grid(row=0, column=1, padx=10)
 
     def retake(self):
         self.is_previewing = False
@@ -182,7 +217,8 @@ class CameraPage(PageWithBackground):
             script_dir = os.path.dirname(os.path.abspath(__file__))
             aging_script = os.path.abspath(os.path.join(script_dir, "..", "face_aging.py"))
             subprocess.Popen(["python", aging_script, "chuck_origin.jpg"])
-        except: pass
+        except Exception as e:
+            print(f"Errore lancio aging: {e}")
         self.controller.show_page("NamePage")
 
 class QuestionBase(PageWithBackground):
@@ -214,13 +250,14 @@ class EndPage(PageWithBackground):
         self.status_label = self.canvas.create_text(500, 400, text="Interrogando il tempo...", font=TITLE_FONT, fill="white")
 
     def generate_future_timeline(self):
-        self.controller.fetch_openai_bio(self.on_complete)
+        self.controller.fetch_gemini_bio(self.on_complete)
 
     def on_complete(self, message):
         self.canvas.itemconfig(self.status_label, text=message)
         tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.controller.root.destroy).place(x=350, y=550)
 
 if __name__ == "__main__":
+    if os.path.exists("user_data.txt"): os.remove("user_data.txt")
     root = tk.Tk()
     app = LifeOfChuckApp(root)
     root.mainloop()

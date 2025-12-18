@@ -1,10 +1,4 @@
 AGE: 24
-<<<<<<< HEAD
 NAME: Mario
 DREAM: Sleep
 BIO: No
-=======
-NAME: David
-DREAM: I wish to become an astronaut
-BIO: i study philosophy
->>>>>>> 2c81a4b7321f1b5cb5f77f8485cbab5f496305ec

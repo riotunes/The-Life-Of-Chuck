@@ -4,6 +4,9 @@ import os
 import shutil
 import sys
 
+# Add parent directory to path for process_coordinator import
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Load environment variables from .env file
 from dotenv import load_dotenv
 load_dotenv()
@@ -23,6 +26,7 @@ from camera_capture import capture_face
 from face_aging import generate_age_progression
 from camera_to_uv import convert_images_to_uv
 from osc_sender import send_pipeline_complete, send_with_metadata
+from process_coordinator import signal_pipeline_complete
 
 
 # Output directories
@@ -145,6 +149,9 @@ def run_pipeline():
         num_textures=len(uv_textures)
     )
     print()
+
+    # Signal to coordinator that pipeline is complete
+    signal_pipeline_complete()
 
 
 if __name__ == "__main__":

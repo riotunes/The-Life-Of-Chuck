@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 from google import genai
+from process_coordinator import init_flags, signal_gui_complete
 
 GEMINI_API_KEY = "AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A"
 
@@ -274,10 +275,15 @@ class EndPage(PageWithBackground):
 
     def on_complete(self, message):
         self.canvas.itemconfig(self.status_label, text=message)
-        tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.controller.root.destroy).place(x=350, y=550)
+        tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal).place(x=350, y=550)
+
+    def finish_and_signal(self):
+        signal_gui_complete()  # Signal coordinator that GUI is done
+        self.controller.root.destroy()
 
 if __name__ == "__main__":
     if os.path.exists("user_data.txt"): os.remove("user_data.txt")
+    init_flags()  # Reset coordination flags at start
     root = tk.Tk()
     app = LifeOfChuckApp(root)
     root.mainloop()

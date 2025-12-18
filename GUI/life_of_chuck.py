@@ -8,7 +8,6 @@ import threading
 import time
 from google import genai
 
-# --- CONFIGURAZIONE CHIAVE ---
 GEMINI_API_KEY = "AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A"
 
 class LifeOfChuckApp:
@@ -204,7 +203,6 @@ class CameraPage(PageWithBackground):
             self.controller.captured_image = frame
             self.btn_capture.grid_remove()
             
-            # Pulsanti di conferma originali
             retake_style = BUTTON_STYLE.copy()
             retake_style.update({"width": 12, "bg": "#444", "fg": "white", "text": "RETAKE"})
             confirm_style = BUTTON_STYLE.copy()
@@ -222,7 +220,7 @@ class CameraPage(PageWithBackground):
 
     def confirm(self):
         cv2.imwrite("chuck_origin.jpg", self.controller.captured_image)
-        self.controller.show_page("AgePage") # Changed from NamePage to AgePage
+        self.controller.show_page("AgePage") 
 
 class QuestionBase(PageWithBackground):
     def __init__(self, parent, controller, question_text, key, next_page):
@@ -250,8 +248,7 @@ class AgePage(QuestionBase):
         # Call face aging as soon as age is inserted
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            aging_script = os.path.abspath(os.path.join(script_dir, "..", "face_aging.py"))
-            # Passing the age as an argument if your face_aging.py supports it
+            aging_script = os.path.abspath(os.path.join(script_dir, "..", "life-of-chuck-aging", "main.py"))
             subprocess.Popen(["python", aging_script, "chuck_origin.jpg", age_val])
         except Exception as e:
             print(f"Errore lancio aging: {e}")

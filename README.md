@@ -14,21 +14,6 @@ Ispirato alla struttura narrativa di Stephen King, dove ogni individuo è un uni
 * **Introspezione Generativa:** Utilizzare input testuali per seminare una narrazione visiva del possibile.
 
 ## 🛠️ Caratteristiche Tecniche
-L'esperienza è stata ottimizzata per essere fluida e immersiva nonostante la scala ridotta:
 
-* **Cinematic Background Engine:** Gestione di background animati tramite cycling di frame ad alta risoluzione, ottimizzati per non gravare sulla CPU durante l'uso della webcam.
-* **Interfaccia Minimalista:** Design "All-White on Black" con tipografia *Georgia* per richiamare l'estetica dei romanzi e dei titoli di testa cinematografici.
-* **Data Persistence:** Sistema di salvataggio immediato (`user_data.txt`) per catturare ogni riflessione dell'utente in tempo reale.
-* **Mirror Flip Logic:** Correzione della distorsione della webcam per un'esperienza "a specchio" naturale.
 
 ## 🚀 Installazione e Uso
-
-### Prerequisiti
-* Python 3.11+
-* Webcam funzionante
-
-### Setup
-1. Clona il repository:
-   ```bash
-   git clone [https://github.com/DavidGadiaga/CPAC-Hackaton.git](https://github.com/DavidGadiaga/CPAC-Hackaton.git)
-   cd CPAC-Hackaton

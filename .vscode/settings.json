@@ -1,0 +1,7 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/chuck/bin/python",
+    "python.terminal.activateEnvironment": true,
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/chuck/lib/python3.13/site-packages"
+    ]
+}

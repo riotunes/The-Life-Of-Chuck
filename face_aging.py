@@ -3,9 +3,13 @@
 import os
 import io
 from pathlib import Path
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from PIL import Image
+
+# Load environment variables
+load_dotenv()
 
 
 def generate_aged_image(client, source_image, current_age, target_age):
@@ -85,9 +89,13 @@ def generate_age_progression(
         List of paths to generated images (including original)
     """
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Initialize the Gemini client
-    client = genai.Client()
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not found in environment variables. Please check your .env file.")
+
+    client = genai.Client(api_key=api_key)
     
     # Calculate target ages
     target_ages = [

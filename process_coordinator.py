@@ -126,6 +126,31 @@ def wait_for_both(timeout=300, check_interval=0.5):
     return False
 
 
+def wait_for_pipeline_only(timeout=300, check_interval=0.5):
+    """
+    Wait only for pipeline completion (used by GUI after text generation).
+
+    Args:
+        timeout: Maximum seconds to wait (default 5 minutes)
+        check_interval: Seconds between checks
+
+    Returns:
+        True if pipeline completed, False if timeout
+    """
+    start_time = time.time()
+
+    print("[Coordinator] Waiting for aging pipeline to complete...")
+
+    while time.time() - start_time < timeout:
+        if is_pipeline_complete():
+            print("[Coordinator] Pipeline is complete!")
+            return True
+        time.sleep(check_interval)
+
+    print("[Coordinator] Timeout waiting for pipeline")
+    return False
+
+
 if __name__ == "__main__":
     # Test/debug mode
     print("Process Coordinator - Debug Mode")

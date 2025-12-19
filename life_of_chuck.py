@@ -7,7 +7,7 @@ import subprocess
 import threading
 import time
 from google import genai
-from process_coordinator import init_flags, signal_gui_complete
+from process_coordinator import init_flags, signal_gui_complete, wait_for_pipeline_only
 
 GEMINI_API_KEY = "AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A"
 
@@ -96,20 +96,27 @@ class LifeOfChuckApp:
                 Dati Utente: {data}
                 Età attuale: {current_age}
                 
-                OBIETTIVO:
-                Scrivi una biografia futura narrativa, logica e molto dettagliata. 
-                Decidi tu l'età del decesso (longevità casuale).
-                Dividi in blocchi decennali: [AGE X], [AGE Y]... e [DEATH].
+                OBJECTIVE:
+                Generate exactly 5 raw image prompts for a generative AI. 
+                NO SENTENCES. NO STORY. NO VERBS.
 
-                REGOLE MANDATORIE:
-                1. Ogni blocco deve contenere una narrazione di ALMENO 150 PAROLE. Sii estremamente descrittivo riguardo al lavoro e al raggiungimento dei sogni.
-                2. Ogni singola parola deve essere seguita da una virgola (esempio: Il, successo, arriva, dopo, anni, di, fatica,).
-                3. Non usare punti fermi, usa solo virgole dopo ogni parola.
-                4. Focus: Evoluzione professionale, traguardi del sogno, collaborazioni, impatto nel settore. No descrizioni fisiche.
-                5. Lingua: Inglese.
-                6. Tieni a questo punto unicamente le parole chiave della biografia più soignificative
-                
-                IMPORTANTE: Se la narrazione di un blocco è inferiore alle 150 parole, espandi i dettagli lavorativi e i pensieri della persona.
+                STRUCTURE:
+                - Exactly 5 blocks: [AGE X] (4 random ages) and [DEATH].
+                - start from the current age, never go below it.
+
+                STRICT FORMAT RULES:
+                1. WORDS: Each block must have EXACTLY 12 words.
+                2. CONTENT: Only visual nouns and adjectives.
+                3. BANNED: No 'is', 'has', 'the', 'with', 'a', 'of', 'in', 'to'. No verbs.
+                4. PUNCTUATION: Every single word MUST be followed by a comma.
+                5. NO PERIODS: Zero dots. Only commas.
+                6. FOCUS: Lighting, materials, atmosphere, specific objects.
+                7. REALISM: Include decay, shadows, and gritty details.
+
+                EXAMPLE OF DESIRED OUTPUT:
+                [AGE 42]
+                Rusty, metal, flickering, neon, blue, rain, wet, pavement, silhouette, cinematic, fog, smoke,
+
                 """
                 
                 response = client.models.generate_content(
@@ -293,7 +300,34 @@ class EndPage(PageWithBackground):
         self.controller.fetch_gemini_bio(self.on_complete)
 
     def on_complete(self, message):
+        # Text generation complete, now wait for aging pipeline
         self.canvas.itemconfig(self.status_label, text=message)
+        #self.canvas.create_text(500, 460, text="Waiting for aging process...", font=("Georgia", 18, "italic"), fill="white", tags="waiting")
+
+        # Start waiting for pipeline in background thread
+        threading.Thread(target=self.wait_for_pipeline, daemon=True).start()
+
+    def wait_for_pipeline(self):
+        """Wait for aging pipeline to complete, then show FINISH button."""
+        # Wait for pipeline (timeout 5 minutes)
+        pipeline_done = wait_for_pipeline_only(timeout=300, check_interval=1.0)
+
+        # Update UI on main thread
+        if pipeline_done:
+            self.controller.root.after(0, self.show_finish_button)
+        else:
+            self.controller.root.after(0, self.show_timeout_message)
+
+    def show_finish_button(self):
+        """Show the FINISH button (called when both processes are done)."""
+        self.canvas.delete("waiting")
+        #self.canvas.create_text(500, 460, text="All processes complete!", font=("Georgia", 18, "italic"), fill="white")
+        tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal).place(x=350, y=550)
+
+    def show_timeout_message(self):
+        """Show timeout message if pipeline didn't complete."""
+        self.canvas.delete("waiting")
+        #self.canvas.create_text(500, 460, text="Aging process timed out. You can still finish.", font=("Georgia", 16, "italic"), fill="orange")
         tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal).place(x=350, y=550)
 
     def finish_and_signal(self):

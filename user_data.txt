@@ -1,1 +1,4 @@
 AGE: 24
+NAME: Mario
+DREAM: To end this week
+BIO: Swag

@@ -4,9 +4,6 @@ import os
 import shutil
 import sys
 
-# Add parent directory to path for process_coordinator import
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 # Load environment variables from .env file
 from dotenv import load_dotenv
 load_dotenv()
@@ -74,9 +71,14 @@ def run_pipeline():
     # Step 2: Get age and generate progression
     print("[STEP 2/3] AGE PROGRESSION")
     print("-" * 40)
-    
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    user_data_path = os.path.join(script_dir, 'user_data.txt')
+
     try:
-        current_age = int(input("Enter your current age: "))
+        with open(user_data_path, 'r') as f:
+            content = f.read().strip()
+        current_age = int(content.split(':')[1].strip())
     except ValueError:
         print("Invalid age. Exiting.")
         sys.exit(1)

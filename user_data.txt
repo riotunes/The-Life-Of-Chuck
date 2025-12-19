@@ -1,4 +1,4 @@
 AGE: 24
-NAME: mas
-DREAM: rhber
-BIO: rhwbrh
+NAME: Mario
+DREAM: Sas
+BIO: Sos

@@ -170,7 +170,9 @@ if __name__ == "__main__":
     
     # Get current age from user
     try:
-        with open('user_data.txt', 'r') as f:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        user_data_path = os.path.join(script_dir, 'user_data.txt')
+        with open(user_data_path, 'r') as f:
             content = f.read().strip()
         current_age = int(content.split(':')[1].strip())
     except ValueError:

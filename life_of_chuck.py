@@ -75,14 +75,14 @@ class LifeOfChuckApp:
             try:
                 # Setup target directory paths
                 script_dir = os.path.dirname(os.path.abspath(__file__))
-                parent_dir = os.path.dirname(script_dir) # Go up to the root project folder
-                target_dir = os.path.join(parent_dir, "futures_texts")
-                
+                target_dir = os.path.join(script_dir, "futures_texts")
+
                 # Ensure the 'futures' folder exists
                 if not os.path.exists(target_dir):
                     os.makedirs(target_dir)
 
-                with open("user_data.txt", "r", encoding="utf-8") as f:
+                user_data_path = os.path.join(script_dir, "user_data.txt")
+                with open(user_data_path, "r", encoding="utf-8") as f:
                     data = f.read()
                     
                 import re
@@ -119,22 +119,22 @@ class LifeOfChuckApp:
                 
                 if response.text:
                     full_story = response.text
-                    
-                    # Pulizia file precedenti
-                    for f_old in os.listdir("."):
+
+                    # Pulizia file precedenti nel target_dir
+                    for f_old in os.listdir(target_dir):
                         if f_old.startswith("future_") and f_old.endswith(".txt"):
-                            os.remove(f_old)
+                            os.remove(os.path.join(target_dir, f_old))
 
                     parts = full_story.split('[')
                     for part in parts:
                         if ']' in part:
                             header, content = part.split(']', 1)
                             clean_header = header.strip().lower().replace(' ', '_')
-                            filename = f"future_{clean_header}.txt"
-                            
+                            filename = os.path.join(target_dir, f"future_{clean_header}.txt")
+
                             # Rimuoviamo eventuali righe vuote e puliamo lo spazio finale
                             text_content = content.strip()
-                            
+
                             with open(filename, "w", encoding="utf-8") as f:
                                 f.write(text_content)
                     
@@ -152,6 +152,10 @@ class LifeOfChuckApp:
         threading.Thread(target=run, daemon=True).start()
 
     def emergency_save(self):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        target_dir = os.path.join(script_dir, "futures_texts")
+        os.makedirs(target_dir, exist_ok=True)
+
         backup = {
             "future_age_40.txt": "Un periodo di grande successo.",
             "future_age_60.txt": "La saggezza ti guida.",
@@ -159,7 +163,8 @@ class LifeOfChuckApp:
             "future_death.txt": "Un lascito di ispirazione."
         }
         for name, text in backup.items():
-            with open(name, "w", encoding="utf-8") as f:
+            filepath = os.path.join(target_dir, name)
+            with open(filepath, "w", encoding="utf-8") as f:
                 f.write(text)
 
 # --- STYLING (COSI' COME TI PIACE) ---
@@ -229,7 +234,9 @@ class CameraPage(PageWithBackground):
         self.start_webcam()
 
     def confirm(self):
-        cv2.imwrite("life-of-chuck-aging/chuck_origin.jpg", self.controller.captured_image)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        image_path = os.path.join(script_dir, "chuck_origin.jpg")
+        cv2.imwrite(image_path, self.controller.captured_image)
         self.controller.show_page("AgePage") 
 
 class QuestionBase(PageWithBackground):
@@ -242,7 +249,9 @@ class QuestionBase(PageWithBackground):
         tk.Button(self, text="CONTINUE", **BUTTON_STYLE, command=self.save_and_next).place(x=350, y=560)
 
     def save_and_next(self):
-        with open("user_data.txt", "a", encoding="utf-8") as f:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        user_data_path = os.path.join(script_dir, "user_data.txt")
+        with open(user_data_path, "a", encoding="utf-8") as f:
             f.write(f"{self.key.upper()}: {self.entry.get()}\n")
         self.controller.show_page(self.next_page)
 
@@ -251,19 +260,20 @@ class AgePage(QuestionBase):
         super().__init__(parent, controller, "How old are you?", "age", "NamePage")
 
     def save_and_next(self):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        user_data_path = os.path.join(script_dir, "user_data.txt")
+
         age_val = self.entry.get()
-        with open("user_data.txt", "a", encoding="utf-8") as f:
+        with open(user_data_path, "a", encoding="utf-8") as f:
             f.write(f"AGE: {age_val}\n")
-        
+
         # Call face aging as soon as age is inserted
         try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            aging_dir = os.path.abspath(os.path.join(script_dir, "life-of-chuck-aging"))
-            aging_script = os.path.join(aging_dir, "main.py")
-            subprocess.Popen(["python", aging_script, "chuck_origin.jpg", age_val], cwd=aging_dir)
+            aging_script = os.path.join(script_dir, "main.py")
+            subprocess.Popen(["python", aging_script, "chuck_origin.jpg", age_val], cwd=script_dir)
         except Exception as e:
             print(f"Errore lancio aging: {e}")
-            
+
         self.controller.show_page(self.next_page)
 
 class NamePage(QuestionBase):
@@ -291,7 +301,10 @@ class EndPage(PageWithBackground):
         self.controller.root.destroy()
 
 if __name__ == "__main__":
-    if os.path.exists("user_data.txt"): os.remove("user_data.txt")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    user_data_path = os.path.join(script_dir, "user_data.txt")
+    if os.path.exists(user_data_path):
+        os.remove(user_data_path)
     init_flags()  # Reset coordination flags at start
     root = tk.Tk()
     app = LifeOfChuckApp(root)

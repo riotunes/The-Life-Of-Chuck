@@ -68,6 +68,7 @@ def _check_and_send_start():
     if both_complete():
         print("[Coordinator] Both processes complete! Sending OSC start...")
         _send_osc_start(msg=0)
+        time.sleep(0.5)
         _send_osc_start(msg=1)
         _cleanup_flags()
 

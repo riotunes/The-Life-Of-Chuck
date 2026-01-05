@@ -64,13 +64,21 @@ def both_complete():
 
 
 def _check_and_send_start():
-    """Internal: Check if both done, and send OSC start if so."""
+    """Internal: Check if both done, and send OSC start if so (in background thread)."""
     if both_complete():
-        print("[Coordinator] Both processes complete! Sending OSC start...")
-        _send_osc_start(msg=0)
-        time.sleep(0.5)
-        _send_osc_start(msg=1)
-        _cleanup_flags()
+        # Send OSC in separate thread so it doesn't block audio start
+        def send_osc_delayed():
+            print("[Coordinator] Both processes complete! Waiting 5s before OSC start...")
+            time.sleep(5.0)  # Delay before sending OSC to TouchDesigner
+            print("[Coordinator] Sending OSC start...")
+            _send_osc_start(msg=0)
+            time.sleep(0.5)
+            _send_osc_start(msg=1)
+            _cleanup_flags()
+        
+        import threading
+        osc_thread = threading.Thread(target=send_osc_delayed, daemon=True)
+        osc_thread.start()
 
 
 def _send_osc_start(ip="127.0.0.1", port=9000, msg=None):

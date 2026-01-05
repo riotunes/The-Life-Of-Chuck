@@ -1,19 +1,19 @@
 [AGE 24]
-Glowing, hammer, sparks, falling, electric, dust, broken, concrete, cracked, vibrant, energy, burst,
-MUSIC: 0.8,0.7,120,0.6,0.5
+Weathered, sailboat, turquoise, ocean, vast, horizon, distant, clouds, golden, sunlight, salty, spray,
+MUSIC: 0.3,0.7,90,0.4,0.1
 
-[AGE 37]
-Worn, leather, jacket, ripped, jeans, dark, alleyway, gritty, shadows, fire, distant, sirens,
-MUSIC: 0.5,0.3,90,0.4,0.7
+[AGE 31]
+Dilapidated, wooden, hull, barnacles, encrusted, ropes, frayed, canvas, torn, seagulls, circling, shadows,
+MUSIC: 0.4,0.2,70,0.2,0.6
 
-[AGE 51]
-Silver, beard, tired, eyes, abandoned, warehouse, cold, light, long, coat, steel, girders,
-MUSIC: 0.3,0.2,70,0.2,0.3
+[AGE 38]
+Creaking, mast, swaying, violently, storm, brewing, dark, waves, crashing, foam, swirling, ominous,
+MUSIC: 0.8,0.1,140,0.3,0.9
 
-[AGE 68]
-Cracked, earth, desolate, landscape, stormy, sky, broken, shield, distant, figure, fading, hope,
-MUSIC: 0.6,0.1,80,0.1,0.8
+[AGE 52]
+Sunken, treasure, chest, algae, covered, gold, coins, scattered, sand, shimmering, light, filtered, deep,
+MUSIC: 0.5,0.6,110,0.7,0.2
 
 [DEATH]
-Dust, particles, golden, light, ethereal, glow, shattered, armor, peaceful, smile, cosmic, void,
-MUSIC: 0.2,0.9,60,0.3,0.0
+Ghostly, shipwreck, skeletal, remains, coral, growing, through, bones, bioluminescent, fish, glowing, ethereal,
+MUSIC: 0.2,0.3,60,0.1,0.5

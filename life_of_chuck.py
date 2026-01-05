@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
 import os
+import sys
 import subprocess
 import threading
 import time
@@ -42,9 +43,6 @@ class LifeOfChuckApp:
 
         self.show_page("StartPage")
         self.animate_background()
-        
-        # Pre-analyze music files in background
-        self.start_music_analysis()
 
     def start_music_analysis(self):
         """Start music analysis in background thread at app startup."""
@@ -54,19 +52,18 @@ class LifeOfChuckApp:
                 main_script = os.path.join(script_dir, "main.py")
                 
                 print("🎵 Starting background music analysis...")
-                result = subprocess.run(
+                # Use Popen instead of run to avoid blocking
+                process = subprocess.Popen(
                     ["python", main_script, "--analyze-only"],
                     cwd=script_dir,
-                    capture_output=True,
-                    text=True
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE
                 )
                 
-                if result.returncode == 0:
-                    print("✅ Music analysis complete")
-                else:
-                    print(f"⚠️ Music analysis warning: {result.stderr}")
+                # Don't wait for completion, just let it run in background
+                print("✅ Music analysis started in background")
             except Exception as e:
-                print(f"⚠️ Could not analyze music: {e}")
+                print(f"⚠️ Could not start music analysis: {e}")
         
         threading.Thread(target=analyze, daemon=True).start()
 
@@ -169,23 +166,45 @@ class LifeOfChuckApp:
                         if f_old.startswith("future_") and f_old.endswith(".txt"):
                             os.remove(os.path.join(target_dir, f_old))
 
+                    # Create music_params folder
+                    music_params_dir = os.path.join(script_dir, "music_params")
+                    if not os.path.exists(music_params_dir):
+                        os.makedirs(music_params_dir)
+                    
+                    # Clean old music params
+                    for f_old in os.listdir(music_params_dir):
+                        if f_old.endswith(".txt"):
+                            os.remove(os.path.join(music_params_dir, f_old))
+
                     parts = full_story.split('[')
                     for part in parts:
                         if ']' in part:
                             header, content = part.split(']', 1)
                             clean_header = header.strip().lower().replace(' ', '_')
-                            filename = os.path.join(target_dir, f"future_{clean_header}.txt")
-
-                            # Rimuoviamo eventuali righe vuote e puliamo lo spazio finale
-                            text_content = content.strip()
-
-                            with open(filename, "w", encoding="utf-8") as f:
-                                f.write(text_content)
-                    
-                    # Save also music parameters separately for easy parsing
-                    music_params_file = os.path.join(target_dir, "music_params.txt")
-                    with open(music_params_file, "w", encoding="utf-8") as f:
-                        f.write(full_story)
+                            
+                            # Separate image prompt from music params
+                            lines = content.strip().split('\n')
+                            image_lines = []
+                            music_line = None
+                            
+                            for line in lines:
+                                line = line.strip()
+                                if line.startswith('MUSIC:'):
+                                    music_line = line
+                                elif line:
+                                    image_lines.append(line)
+                            
+                            # Save image prompt to futures_texts
+                            image_filename = os.path.join(target_dir, f"future_{clean_header}.txt")
+                            image_content = '\n'.join(image_lines)
+                            with open(image_filename, "w", encoding="utf-8") as f:
+                                f.write(image_content)
+                            
+                            # Save music params to music_params folder
+                            if music_line:
+                                music_filename = os.path.join(music_params_dir, f"music_{clean_header}.txt")
+                                with open(music_filename, "w", encoding="utf-8") as f:
+                                    f.write(music_line)
                     
                     msg = "Your journey is about to unfold."
                 else:
@@ -337,6 +356,8 @@ class EndPage(PageWithBackground):
     def __init__(self, parent, controller):
         super().__init__(parent, controller)
         self.status_label = self.canvas.create_text(500, 400, text="Looking at your path among the stars", font=TITLE_FONT, fill="white")
+        self.music_ready = False
+        self.music_process = None
 
     def generate_future_timeline(self):
         self.controller.fetch_gemini_bio(self.on_complete)
@@ -346,8 +367,37 @@ class EndPage(PageWithBackground):
         self.canvas.itemconfig(self.status_label, text=message)
         #self.canvas.create_text(500, 460, text="Waiting for aging process...", font=("Georgia", 18, "italic"), fill="white", tags="waiting")
 
+        # Start pre-loading music in background (while waiting for pipeline)
+        threading.Thread(target=self.preload_music, daemon=True).start()
+        
         # Start waiting for pipeline in background thread
         threading.Thread(target=self.wait_for_pipeline, daemon=True).start()
+
+    def preload_music(self):
+        """Pre-load music analysis in background so it's ready when FINISH is pressed."""
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            main_script = os.path.join(script_dir, "main.py")
+            
+            print("🎵 Pre-loading music in background...")
+            # Run pre-analysis (this builds cache)
+            result = subprocess.run(
+                ["python", main_script, "--analyze-only"],
+                cwd=script_dir,
+                capture_output=True,
+                text=True,
+                timeout=120  # 2 minute timeout
+            )
+            
+            if result.returncode == 0:
+                print("✅ Music pre-loaded and ready!")
+                self.music_ready = True
+            else:
+                print(f"⚠️ Music pre-load warning: {result.stderr[:100] if result.stderr else 'unknown'}")
+                self.music_ready = True  # Continue anyway
+        except Exception as e:
+            print(f"⚠️ Music pre-load error: {e}")
+            self.music_ready = True  # Continue anyway
 
     def wait_for_pipeline(self):
         """Wait for aging pipeline to complete, then show FINISH button."""
@@ -373,21 +423,44 @@ class EndPage(PageWithBackground):
         tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal).place(x=350, y=550)
 
     def finish_and_signal(self):
-        # Start music integration before closing GUI
+        # Start music IMMEDIATELY - subprocess.Popen returns instantly
         script_dir = os.path.dirname(os.path.abspath(__file__))
         main_script = os.path.join(script_dir, "main.py")
         
-        # Launch music player in background
+        # Launch music player - don't capture output for faster startup
         try:
-            subprocess.Popen(
-                ["python", main_script, "--music-only"],
+            # Use os.setsid on Unix to detach process completely
+            import os as os_module
+            self.music_process = subprocess.Popen(
+                ["python", "-u", main_script, "--music-only"],  # -u for unbuffered output
                 cwd=script_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stdout=None,  # Don't capture - faster
+                stderr=None,
+                start_new_session=True  # Detach from parent
             )
-            print("🎵 Music player started")
+            print("🎵 Music player launched!")
         except Exception as e:
             print(f"⚠️ Could not start music player: {e}")
+        
+        # Send OSC messages with delay using subprocess (survives GUI close)
+        osc_code = '''
+import time
+from pythonosc import udp_client
+print("[OSC] Waiting 5s before sending start...")
+time.sleep(5.0)
+client = udp_client.SimpleUDPClient("127.0.0.1", 9000)
+client.send_message("/touchdesigner/start", 0)
+time.sleep(0.5)
+client.send_message("/touchdesigner/start", 1)
+print("[OSC] Sent: /touchdesigner/start")
+'''
+        subprocess.Popen(
+            ["python", "-c", osc_code],
+            cwd=script_dir,
+            stdout=None,
+            stderr=None,
+            start_new_session=True
+        )
         
         signal_gui_complete()  # Signal coordinator that GUI is done
         self.controller.root.destroy()
@@ -395,9 +468,41 @@ class EndPage(PageWithBackground):
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     user_data_path = os.path.join(script_dir, "user_data.txt")
-    if os.path.exists(user_data_path):
-        os.remove(user_data_path)
-    init_flags()  # Reset coordination flags at start
-    root = tk.Tk()
-    app = LifeOfChuckApp(root)
-    root.mainloop()
+
+def run_music_analysis_only():
+    """Run only music analysis - called with --analyze-music flag."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    main_script = os.path.join(script_dir, "main.py")
+    
+    print("🎵 Starting music analysis...")
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["python", main_script, "--analyze-only"],
+            cwd=script_dir
+        )
+        if result.returncode == 0:
+            print("✅ Music analysis complete")
+        else:
+            print("⚠️ Music analysis failed")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+
+
+if __name__ == "__main__":
+    import sys
+    
+    # Check for music analysis flag
+    if len(sys.argv) > 1 and sys.argv[1] == "--analyze-music":
+        run_music_analysis_only()
+    else:
+        # Normal GUI flow
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        user_data_path = os.path.join(script_dir, "user_data.txt")
+        if os.path.exists(user_data_path):
+            os.remove(user_data_path)
+        init_flags()  # Reset coordination flags at start
+        root = tk.Tk()
+        app = LifeOfChuckApp(root)
+        root.mainloop()
+    

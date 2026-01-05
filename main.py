@@ -57,33 +57,36 @@ def clear_directory(directory):
 
 
 def parse_music_params_from_gemini():
-    """Parse music parameters from Gemini-generated text files."""
+    """Parse music parameters from Gemini-generated text files in music_params folder."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    futures_dir = os.path.join(script_dir, FUTURES_DIR)
-    music_params_file = os.path.join(futures_dir, "music_params.txt")
+    music_params_dir = os.path.join(script_dir, "music_params")
     
     music_params = []
     
     try:
-        if os.path.exists(music_params_file):
-            with open(music_params_file, 'r', encoding='utf-8') as f:
-                content = f.read()
+        if os.path.exists(music_params_dir):
+            # Get all music param files sorted
+            music_files = sorted([f for f in os.listdir(music_params_dir) if f.startswith("music_") and f.endswith(".txt")])
             
-            # Parse MUSIC: lines
-            # Format: MUSIC: arousal,valence,bpm,danceability,aggressive
-            music_lines = re.findall(r'MUSIC:\s*([0-9.,\s]+)', content)
-            
-            for line in music_lines:
-                values = [float(x.strip()) for x in line.strip().split(',')]
-                if len(values) == 5:
-                    params = {
-                        'arousal': values[0],
-                        'valence': values[1],
-                        'bpm': values[2],
-                        'danceability': values[3],
-                        'aggressive': values[4]
-                    }
-                    music_params.append(params)
+            for music_file in music_files:
+                filepath = os.path.join(music_params_dir, music_file)
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                
+                # Parse MUSIC: line
+                # Format: MUSIC: arousal,valence,bpm,danceability,aggressive
+                match = re.search(r'MUSIC:\s*([0-9.,\s]+)', content)
+                if match:
+                    values = [float(x.strip()) for x in match.group(1).strip().split(',')]
+                    if len(values) == 5:
+                        params = {
+                            'arousal': values[0],
+                            'valence': values[1],
+                            'bpm': values[2],
+                            'danceability': values[3],
+                            'aggressive': values[4]
+                        }
+                        music_params.append(params)
         
         if not music_params:
             # Fallback to default values if no params found
@@ -106,74 +109,194 @@ def parse_music_params_from_gemini():
     return music_params
 
 
-def start_music_player_thread(music_params):
-    """Start music player in separate thread, sending params every 30 seconds."""
+def start_music_player_thread(music_params, silent=False):
+    """Start music player in separate thread with pre-calculated tracks and crossfade."""
     if not MUSIC_SCORE_AVAILABLE:
-        print("\n⚠️ Music player not available, skipping music integration")
+        if not silent:
+            print("\n⚠️ Music player not available, skipping music integration")
         return None
     
+    try:
+        import numpy as np
+        import sounddevice as sd
+        from essentia.standard import MonoLoader
+    except ImportError as e:
+        if not silent:
+            print(f"\n⚠️ Audio playback not available: {e}")
+        return None
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    audio_folder = os.path.join(script_dir, "musica", "audio")
+    
+    if not os.path.exists(audio_folder):
+        if not silent:
+            print(f"⚠️ Audio folder not found: {audio_folder}")
+        return None
+    
+    # ===== PRE-CALCULATE ALL TRACKS BEFORE PLAYBACK =====
+    if not silent:
+        print("\n[MUSIC] Preparing tracks...")
+    
+    # Initialize analyzer (uses cache if available)
+    analyzer = MusicAnalyzer(audio_folder)
+    analyzer.analyze()
+    
+    # Create player for calculations
+    player = MusicPlayer(
+        analyzer=analyzer,
+        osc_ip="0.0.0.0",
+        osc_port=9001,
+        playback_duration=30.0
+    )
+    
+    # Pre-calculate all closest tracks
+    playlist = []
+    for idx, params in enumerate(music_params):
+        closest = player.find_closest_track(
+            arousal=params['arousal'],
+            valence=params['valence'],
+            bpm=params['bpm'],
+            danceability=params['danceability'],
+            aggressive=params['aggressive']
+        )
+        
+        if closest:
+            playlist.append({
+                'path': closest.get('path', ''),
+                'filename': closest.get('filename', ''),
+                'params': params,
+                'scene': idx + 1
+            })
+            if not silent:
+                print(f"  Scene {idx + 1}: {closest.get('filename', 'Unknown')[:40]}")
+        else:
+            if not silent:
+                print(f"  Scene {idx + 1}: No track found!")
+    
+    if not playlist:
+        if not silent:
+            print("❌ No tracks found for any scene!")
+        return None
+    
+    if not silent:
+        print(f"✅ {len(playlist)} tracks ready")
+    
+    # ===== PRE-LOAD ALL AUDIO =====
+    if not silent:
+        print("[MUSIC] Loading audio...")
+    
+    sample_rate = 44100
+    duration = 30.0  # 30 seconds per track
+    crossfade_duration = 2.0  # 2 second crossfade
+    crossfade_samples = int(crossfade_duration * sample_rate)
+    
+    audio_segments = []
+    for item in playlist:
+        try:
+            loader = MonoLoader(filename=item['path'], sampleRate=sample_rate)
+            audio = loader()
+            
+            # Find first onset for better start point
+            try:
+                from essentia.standard import OnsetRate
+                onset_rate = OnsetRate()
+                onsets, _ = onset_rate(audio)
+                start_time = float(onsets[0]) if len(onsets) > 0 else 0.0
+            except:
+                start_time = 0.0
+            
+            start_sample = int(start_time * sample_rate)
+            # Get 30 seconds + crossfade buffer
+            end_sample = start_sample + int((duration + crossfade_duration) * sample_rate)
+            
+            if start_sample >= len(audio):
+                start_sample = 0
+            end_sample = min(end_sample, len(audio))
+            
+            segment = audio[start_sample:end_sample]
+            audio_segments.append(segment)
+        except Exception as e:
+            if not silent:
+                print(f"  ❌ Error loading {item['filename']}: {e}")
+            audio_segments.append(np.zeros(int(duration * sample_rate)))
+    
+    if not silent:
+        print("✅ Ready!")
+    
+    # ===== PLAYBACK WITH SMOOTH CROSSFADE =====
     def music_loop():
         try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            audio_folder = os.path.join(script_dir, "musica", "audio")
+            import numpy as np
+            import sounddevice as sd
+            from pythonosc import udp_client
             
-            if not os.path.exists(audio_folder):
-                print(f"⚠️ Audio folder not found: {audio_folder}")
-                return
+            # FADE PARAMETERS - longer for smoother transitions
+            fade_in_sec = 2.0    # 2 second fade in
+            fade_out_sec = 3.0   # 3 second fade out
+            scene_duration = 30.0  # Each scene is exactly 30 seconds
             
-            # Initialize music analyzer and player
-            print("\n[MUSIC] Initializing music analyzer...")
-            analyzer = MusicAnalyzer(audio_folder)
-            analyzer.analyze()
-            
-            print("[MUSIC] Starting music player...")
-            player = MusicPlayer(
-                analyzer=analyzer,
-                osc_ip="0.0.0.0",
-                osc_port=9001,  # Different port from TouchDesigner
-                playback_duration=30.0
-            )
-            
-            # Send params in sequence, every 30 seconds
-            print(f"\n[MUSIC] Will play {len(music_params)} tracks (one per scene)")
-            print("=" * 60)
-            
-            # Play each scene once, then stop
-            for idx, params in enumerate(music_params):
-                print(f"\n[MUSIC] Scene {idx + 1}/{len(music_params)}:")
-                print(f"  Arousal: {params['arousal']:.2f}")
-                print(f"  Valence: {params['valence']:.2f}")
-                print(f"  BPM: {params['bpm']:.1f}")
-                print(f"  Danceability: {params['danceability']:.2f}")
-                print(f"  Aggressive: {params['aggressive']:.2f}")
+            for idx, (item, segment) in enumerate(zip(playlist, audio_segments)):
+                # Ensure we have enough audio for 30 seconds + fade buffer
+                total_needed = int((scene_duration + fade_out_sec) * sample_rate)
                 
-                # Play the closest track
-                player.play_closest(
-                    arousal=params['arousal'],
-                    valence=params['valence'],
-                    bpm=params['bpm'],
-                    danceability=params['danceability'],
-                    aggressive=params['aggressive']
-                )
+                if len(segment) < total_needed:
+                    # Pad with silence if needed
+                    audio_full = np.zeros(total_needed)
+                    audio_full[:len(segment)] = segment
+                else:
+                    audio_full = segment[:total_needed].copy()
                 
-                # Wait 30 seconds before next (except for the last one)
-                if idx < len(music_params) - 1:
-                    time.sleep(30)
+                # Apply fade in (longer for smooth entry)
+                fade_in_samples = int(fade_in_sec * sample_rate)
+                if idx == 0:
+                    # First track: quick fade in to start fast
+                    fade_in_samples = int(0.3 * sample_rate)  # 300ms
+                fade_in = np.linspace(0, 1, fade_in_samples)
+                audio_full[:fade_in_samples] *= fade_in
+                
+                # Apply fade out at end
+                fade_out_samples = int(fade_out_sec * sample_rate)
+                if idx < len(playlist) - 1:
+                    # Gradual fade out starting before scene ends
+                    fade_start = int((scene_duration - fade_out_sec) * sample_rate)
+                    fade_out = np.linspace(1, 0, fade_out_samples)
+                    if fade_start >= 0:
+                        audio_full[fade_start:fade_start + fade_out_samples] *= fade_out
+                else:
+                    # Last track: fade out at end
+                    fade_start = int((scene_duration - fade_out_sec) * sample_rate)
+                    fade_out = np.linspace(1, 0, fade_out_samples)
+                    if fade_start >= 0:
+                        audio_full[fade_start:fade_start + fade_out_samples] *= fade_out
+                    audio_full = audio_full[:int(scene_duration * sample_rate)]
+                
+                # Play audio IMMEDIATELY
+                sd.play(audio_full, sample_rate)
+                
+                # Print scene info after audio starts
+                print(f"[SCENE {item['scene']}/{len(playlist)}] {item['filename'][:35]}...")
+                
+                # Wait exactly 30 seconds for this scene
+                time.sleep(scene_duration)
+                
+                # For last track, wait for fade to finish
+                if idx == len(playlist) - 1:
+                    time.sleep(1.0)
             
-            print("\n" + "=" * 60)
-            print("✅ All scenes completed! Music playback finished.")
-            print("=" * 60)
-        
+            sd.stop()
+            print("✅ Music finished.")
+            
         except Exception as e:
-            print(f"\n❌ Error in music player thread: {e}")
+            print(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
+            sd.stop()
     
-    # Start thread
-    music_thread = threading.Thread(target=music_loop, daemon=False)  # daemon=False to wait for completion
+    # Start thread - music starts IMMEDIATELY
+    music_thread = threading.Thread(target=music_loop, daemon=False)
     music_thread.start()
-    print("\n✅ Music player thread started")
     return music_thread
+
 
 
 def run_pipeline():
@@ -293,27 +416,28 @@ def run_pipeline():
 
 def start_music_integration():
     """Start music player - called externally after FINISH button is pressed."""
-    print("\n[MUSIC] Starting music integration...")
-    print("-" * 40)
-    
-    # Parse music parameters from Gemini output
+    # Parse music parameters FIRST (fast)
     music_params = parse_music_params_from_gemini()
-    print(f"\nParsed {len(music_params)} music parameter sets from Gemini")
     
-    # Start music player thread
-    music_thread = start_music_player_thread(music_params)
+    # Start music player - audio starts IMMEDIATELY
+    music_thread = start_music_player_thread(music_params, silent=True)
     
     if music_thread:
-        print(f"\nWill play {len(music_params)} tracks (30s each), then stop automatically")
-        print("Press Ctrl+C to stop early\n")
+        # Print info AFTER audio has started
+        time.sleep(0.1)  # Small delay to ensure audio is playing
+        print(f"🎵 Playing {len(music_params)} scenes (30s each)")
         
         try:
-            # Wait for the music thread to complete
             music_thread.join()
         except KeyboardInterrupt:
-            print("\n\n🛑 Shutting down...")
+            print("\n🛑 Stopped")
+            try:
+                import sounddevice as sd
+                sd.stop()
+            except:
+                pass
     else:
-        print("\nMusic player not started")
+        print("Music player not available")
 
 
 def pre_analyze_music():
@@ -347,5 +471,8 @@ if __name__ == "__main__":
             start_music_integration()
         elif sys.argv[1] == "--analyze-only":
             pre_analyze_music()
+        else:
+            # Any other argument means run pipeline (e.g., image path, age)
+            run_pipeline()
     else:
         run_pipeline()

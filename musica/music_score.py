@@ -2,11 +2,14 @@
 Music Analysis Module using Essentia
 Analizza file audio per mood, energia e BPM.
 Salva i risultati in JSON e li ricarica se la cartella non è cambiata.
+Include un server OSC per ricevere parametri e riprodurre il brano più vicino.
 """
 
 import os
 import json
 import hashlib
+import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -19,6 +22,24 @@ try:
 except ImportError:
     ESSENTIA_AVAILABLE = False
     print("⚠️ Essentia non installato. Installa con: pip install essentia-tensorflow")
+
+# OSC imports
+try:
+    from pythonosc import dispatcher, osc_server
+    from pythonosc.udp_client import SimpleUDPClient
+    OSC_AVAILABLE = True
+except ImportError:
+    OSC_AVAILABLE = False
+    print("⚠️ python-osc non installato. Installa con: pip install python-osc")
+
+# Audio playback imports
+try:
+    import sounddevice as sd
+    import numpy as np
+    AUDIO_PLAYBACK_AVAILABLE = True
+except ImportError:
+    AUDIO_PLAYBACK_AVAILABLE = False
+    print("⚠️ sounddevice non installato. Installa con: pip install sounddevice")
 
 
 class MusicAnalyzer:
@@ -465,8 +486,304 @@ class MusicAnalyzer:
         return sorted(tracks, key=lambda x: x.get(key, 0), reverse=reverse)
 
 
+class MusicPlayer:
+    """
+    Server OSC che riceve parametri musicali e riproduce il brano più vicino.
+    
+    Riceve via OSC:
+    - arousal, valence, bpm, danceability, aggressive
+    
+    Calcola la distanza euclidea normalizzata e riproduce il brano più vicino
+    per 30 secondi a partire dal primo onset.
+    """
+    
+    def __init__(
+        self, 
+        analyzer: MusicAnalyzer,
+        osc_ip: str = "0.0.0.0",
+        osc_port: int = 9000,
+        playback_duration: float = 30.0
+    ):
+        """
+        Inizializza il player.
+        
+        Args:
+            analyzer: Istanza di MusicAnalyzer con dati già analizzati
+            osc_ip: Indirizzo IP per il server OSC
+            osc_port: Porta per il server OSC
+            playback_duration: Durata della riproduzione in secondi
+        """
+        self.analyzer = analyzer
+        self.osc_ip = osc_ip
+        self.osc_port = osc_port
+        self.playback_duration = playback_duration
+        
+        # Assicurati che i dati siano caricati
+        if not self.analyzer.analysis_results:
+            self.analyzer.analyze()
+        
+        self.tracks = [t for t in self.analyzer.analysis_results.get('tracks', []) 
+                      if t.get('analyzed', False)]
+        
+        # Stato playback
+        self.is_playing = False
+        self.current_stream = None
+        self.stop_event = threading.Event()
+        
+        # Normalizzazione BPM (per calcolo distanza)
+        bpms = [t.get('bpm', 100) for t in self.tracks]
+        self.bpm_min = min(bpms) if bpms else 60
+        self.bpm_max = max(bpms) if bpms else 180
+        
+        # Server OSC
+        self.server = None
+        self.server_thread = None
+        
+    def _normalize_bpm(self, bpm: float) -> float:
+        """Normalizza BPM tra 0 e 1."""
+        if self.bpm_max == self.bpm_min:
+            return 0.5
+        return (bpm - self.bpm_min) / (self.bpm_max - self.bpm_min)
+    
+    def _calculate_distance(self, track: Dict, target: Dict) -> float:
+        """
+        Calcola la distanza euclidea normalizzata tra un brano e i parametri target.
+        Tutte le dimensioni sono normalizzate tra 0 e 1.
+        """
+        # Normalizza BPM del track
+        track_bpm_norm = self._normalize_bpm(track.get('bpm', 100))
+        target_bpm_norm = self._normalize_bpm(target.get('bpm', 100))
+        
+        # Calcola distanza euclidea
+        distance = (
+            (track.get('arousal', 0.5) - target.get('arousal', 0.5)) ** 2 +
+            (track.get('valence', 0.5) - target.get('valence', 0.5)) ** 2 +
+            (track_bpm_norm - target_bpm_norm) ** 2 +
+            (min(1.0, track.get('danceability', 0)) - target.get('danceability', 0.5)) ** 2 +
+            (track.get('mood_aggressive', 0) - target.get('aggressive', 0.5)) ** 2
+        ) ** 0.5
+        
+        return distance
+    
+    def find_closest_track(self, arousal: float, valence: float, bpm: float, 
+                          danceability: float, aggressive: float) -> Optional[Dict]:
+        """Trova il brano con distanza minima dai parametri target."""
+        if not self.tracks:
+            return None
+        
+        target = {
+            'arousal': arousal,
+            'valence': valence,
+            'bpm': bpm,
+            'danceability': danceability,
+            'aggressive': aggressive
+        }
+        
+        closest = None
+        min_distance = float('inf')
+        
+        for track in self.tracks:
+            dist = self._calculate_distance(track, target)
+            if dist < min_distance:
+                min_distance = dist
+                closest = track
+        
+        return closest
+    
+    def _find_first_onset(self, audio_path: str) -> float:
+        """Trova il tempo del primo onset nel file audio."""
+        try:
+            loader = MonoLoader(filename=audio_path, sampleRate=44100)
+            audio = loader()
+            
+            onset_rate = es.OnsetRate()
+            onsets, _ = onset_rate(audio)
+            
+            if len(onsets) > 0:
+                return float(onsets[0])
+            return 0.0
+        except Exception as e:
+            print(f"  ⚠️ Errore nel trovare onset: {e}")
+            return 0.0
+    
+    def _play_audio(self, audio_path: str, start_time: float, duration: float):
+        """Riproduce l'audio dal tempo specificato per la durata indicata."""
+        if not AUDIO_PLAYBACK_AVAILABLE:
+            print("❌ Playback non disponibile. Installa sounddevice.")
+            return
+        
+        try:
+            # Carica audio
+            loader = MonoLoader(filename=audio_path, sampleRate=44100)
+            audio = loader()
+            
+            sample_rate = 44100
+            start_sample = int(start_time * sample_rate)
+            end_sample = start_sample + int(duration * sample_rate)
+            
+            # Assicurati di non superare la lunghezza dell'audio
+            end_sample = min(end_sample, len(audio))
+            
+            if start_sample >= len(audio):
+                start_sample = 0
+            
+            audio_segment = audio[start_sample:end_sample]
+            
+            # Fade in/out per evitare click
+            fade_samples = int(0.05 * sample_rate)  # 50ms fade
+            if len(audio_segment) > fade_samples * 2:
+                # Fade in
+                fade_in = np.linspace(0, 1, fade_samples)
+                audio_segment[:fade_samples] *= fade_in
+                # Fade out
+                fade_out = np.linspace(1, 0, fade_samples)
+                audio_segment[-fade_samples:] *= fade_out
+            
+            print(f"  ▶️ Riproduzione: {duration:.1f}s da {start_time:.2f}s")
+            
+            self.is_playing = True
+            self.stop_event.clear()
+            
+            # Riproduzione
+            sd.play(audio_segment, sample_rate)
+            
+            # Attendi fine riproduzione o stop
+            elapsed = 0
+            while elapsed < duration and not self.stop_event.is_set():
+                time.sleep(0.1)
+                elapsed += 0.1
+            
+            sd.stop()
+            self.is_playing = False
+            print("  ⏹️ Riproduzione terminata")
+            
+        except Exception as e:
+            print(f"  ❌ Errore riproduzione: {e}")
+            self.is_playing = False
+    
+    def stop_playback(self):
+        """Ferma la riproduzione corrente."""
+        self.stop_event.set()
+        if AUDIO_PLAYBACK_AVAILABLE:
+            sd.stop()
+        self.is_playing = False
+    
+    def play_closest(self, arousal: float, valence: float, bpm: float, 
+                    danceability: float, aggressive: float):
+        """Trova e riproduce il brano più vicino ai parametri."""
+        # Ferma eventuale riproduzione in corso
+        self.stop_playback()
+        
+        print(f"\n🎯 Ricevuti parametri OSC:")
+        print(f"   Arousal={arousal:.2f}, Valence={valence:.2f}, BPM={bpm:.1f}")
+        print(f"   Danceability={danceability:.2f}, Aggressive={aggressive:.2f}")
+        
+        # Trova brano più vicino
+        closest = self.find_closest_track(arousal, valence, bpm, danceability, aggressive)
+        
+        if closest is None:
+            print("❌ Nessun brano trovato nel dataset!")
+            return
+        
+        print(f"\n🎵 Brano più vicino: {closest['filename']}")
+        print(f"   Distance: {self._calculate_distance(closest, {'arousal': arousal, 'valence': valence, 'bpm': bpm, 'danceability': danceability, 'aggressive': aggressive}):.3f}")
+        print(f"   Track: arousal={closest.get('arousal', 0):.2f}, valence={closest.get('valence', 0):.2f}, bpm={closest.get('bpm', 0):.1f}")
+        
+        # Trova primo onset
+        audio_path = closest.get('path', '')
+        first_onset = self._find_first_onset(audio_path)
+        print(f"   Primo onset: {first_onset:.2f}s")
+        
+        # Riproduci in un thread separato
+        play_thread = threading.Thread(
+            target=self._play_audio,
+            args=(audio_path, first_onset, self.playback_duration)
+        )
+        play_thread.daemon = True
+        play_thread.start()
+    
+    def _osc_handler(self, address: str, *args):
+        """Handler per messaggi OSC."""
+        print(f"\n📨 Messaggio OSC ricevuto: {address}")
+        
+        if len(args) >= 5:
+            arousal = float(args[0])
+            valence = float(args[1])
+            bpm = float(args[2])
+            danceability = float(args[3])
+            aggressive = float(args[4])
+            
+            self.play_closest(arousal, valence, bpm, danceability, aggressive)
+        else:
+            print(f"⚠️ Parametri insufficienti. Ricevuti: {args}")
+            print("   Formato atteso: arousal valence bpm danceability aggressive")
+    
+    def start_server(self, osc_address: str = "/music/play"):
+        """Avvia il server OSC."""
+        if not OSC_AVAILABLE:
+            print("❌ python-osc non disponibile!")
+            return
+        
+        # Setup dispatcher
+        disp = dispatcher.Dispatcher()
+        disp.map(osc_address, self._osc_handler)
+        disp.set_default_handler(self._osc_handler)
+        
+        # Crea server
+        self.server = osc_server.ThreadingOSCUDPServer(
+            (self.osc_ip, self.osc_port), disp
+        )
+        
+        print("\n" + "="*60)
+        print("🎧 MUSIC PLAYER OSC SERVER")
+        print("="*60)
+        print(f"   Indirizzo: {self.osc_ip}:{self.osc_port}")
+        print(f"   OSC Address: {osc_address}")
+        print(f"   Durata playback: {self.playback_duration}s")
+        print(f"   Brani disponibili: {len(self.tracks)}")
+        print("\n   Formato messaggio OSC:")
+        print(f"   {osc_address} [arousal] [valence] [bpm] [danceability] [aggressive]")
+        print("\n   Esempio (valori 0-1 tranne BPM):")
+        print(f"   {osc_address} 0.7 0.3 120 0.8 0.5")
+        print("\n   Premi Ctrl+C per fermare il server")
+        print("="*60 + "\n")
+        
+        # Avvia server
+        try:
+            self.server.serve_forever()
+        except KeyboardInterrupt:
+            print("\n\n🛑 Server fermato.")
+            self.stop_playback()
+    
+    def start_server_async(self, osc_address: str = "/music/play"):
+        """Avvia il server OSC in un thread separato."""
+        self.server_thread = threading.Thread(
+            target=self.start_server,
+            args=(osc_address,)
+        )
+        self.server_thread.daemon = True
+        self.server_thread.start()
+        return self.server_thread
+
+
 # Esempio di utilizzo
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Music Analyzer & OSC Player")
+    parser.add_argument('--server', action='store_true', 
+                       help='Avvia il server OSC per ricevere parametri e riprodurre musica')
+    parser.add_argument('--port', type=int, default=9000,
+                       help='Porta OSC (default: 9000)')
+    parser.add_argument('--address', type=str, default='/music/play',
+                       help='Indirizzo OSC (default: /music/play)')
+    parser.add_argument('--duration', type=float, default=30.0,
+                       help='Durata riproduzione in secondi (default: 30)')
+    parser.add_argument('--analyze-only', action='store_true',
+                       help='Solo analisi, senza avviare il server')
+    
+    args = parser.parse_args()
+    
     # Configura il percorso della cartella audio
     AUDIO_FOLDER = "/Users/riccardotocci/Desktop/prototype_the_life_of_chuck/musica/audio"
     
@@ -506,6 +823,18 @@ if __name__ == "__main__":
             print(f"   Range BPM: {summary.get('min_bpm', 0)} - {summary.get('max_bpm', 0)}")
             print(f"   Energia media: {summary.get('avg_energy', 0):.2f}")
             print(f"   Durata totale: {summary.get('total_duration_minutes', 0):.1f} minuti")
+        
+        # Avvia server OSC se richiesto
+        if args.server and not args.analyze_only:
+            player = MusicPlayer(
+                analyzer=analyzer,
+                osc_port=args.port,
+                playback_duration=args.duration
+            )
+            player.start_server(osc_address=args.address)
+        elif not args.analyze_only:
+            print("\n💡 Per avviare il server OSC usa: python music_score.py --server")
+            print("   Opzioni: --port 9000 --address /music/play --duration 30")
         
     except FileNotFoundError as e:
         print(f"❌ Errore: {e}")

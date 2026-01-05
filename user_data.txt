@@ -1,4 +1,4 @@
 AGE: 24
-NAME: Mario
-DREAM: To end this week
-BIO: Swag
+NAME: Riccardo
+DREAM: Diventare il capo degli avengers
+BIO: Sono un programmatore e mi piace tanto essere creativo,  e ho il martello di thor

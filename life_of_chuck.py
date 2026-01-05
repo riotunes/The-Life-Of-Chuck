@@ -42,6 +42,33 @@ class LifeOfChuckApp:
 
         self.show_page("StartPage")
         self.animate_background()
+        
+        # Pre-analyze music files in background
+        self.start_music_analysis()
+
+    def start_music_analysis(self):
+        """Start music analysis in background thread at app startup."""
+        def analyze():
+            try:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                main_script = os.path.join(script_dir, "main.py")
+                
+                print("🎵 Starting background music analysis...")
+                result = subprocess.run(
+                    ["python", main_script, "--analyze-only"],
+                    cwd=script_dir,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    print("✅ Music analysis complete")
+                else:
+                    print(f"⚠️ Music analysis warning: {result.stderr}")
+            except Exception as e:
+                print(f"⚠️ Could not analyze music: {e}")
+        
+        threading.Thread(target=analyze, daemon=True).start()
 
     def load_background_frames(self):
         if os.path.exists(self.bg_folder):
@@ -91,31 +118,41 @@ class LifeOfChuckApp:
                 
                 client = genai.Client(api_key=GEMINI_API_KEY)
                 
-                # PROMPT: Focus su lunghezza minima e virgola dopo ogni parola
+                # PROMPT: Focus su lunghezza minima e virgola dopo ogni parola + parametri musicali
                 prompt = f"""
                 Dati Utente: {data}
                 Età attuale: {current_age}
                 
                 OBJECTIVE:
-                Generate exactly 5 raw image prompts for a generative AI. 
+                Generate exactly 5 raw image prompts for a generative AI WITH MUSIC PARAMETERS.
                 NO SENTENCES. NO STORY. NO VERBS.
 
                 STRUCTURE:
                 - Exactly 5 blocks: [AGE X] (4 random ages) and [DEATH].
                 - start from the current age, never go below it.
+                - Each block MUST have TWO parts: IMAGE PROMPT and MUSIC PARAMETERS
 
                 STRICT FORMAT RULES:
-                1. WORDS: Each block must have EXACTLY 12 words.
+                1. WORDS: Each image prompt must have EXACTLY 12 words.
                 2. CONTENT: Only visual nouns and adjectives.
                 3. BANNED: No 'is', 'has', 'the', 'with', 'a', 'of', 'in', 'to'. No verbs.
                 4. PUNCTUATION: Every single word MUST be followed by a comma.
                 5. NO PERIODS: Zero dots. Only commas.
                 6. FOCUS: Lighting, materials, atmosphere, specific objects.
                 7. REALISM: Include decay, shadows, and gritty details.
+                8. MUSIC: After image prompt, add a line with MUSIC: arousal,valence,bpm,danceability,aggressive
+
+                MUSIC PARAMETERS (all values 0.0-1.0 except BPM which is 60-180):
+                - arousal: energy/activation level (0=calm, 1=intense)
+                - valence: positivity (0=sad/negative, 1=happy/positive)
+                - bpm: tempo in beats per minute (60-180)
+                - danceability: rhythmic quality (0=not danceable, 1=very danceable)
+                - aggressive: tension/intensity (0=gentle, 1=aggressive)
 
                 EXAMPLE OF DESIRED OUTPUT:
                 [AGE 42]
                 Rusty, metal, flickering, neon, blue, rain, wet, pavement, silhouette, cinematic, fog, smoke,
+                MUSIC: 0.6,0.4,100,0.5,0.3
 
                 """
                 
@@ -144,6 +181,11 @@ class LifeOfChuckApp:
 
                             with open(filename, "w", encoding="utf-8") as f:
                                 f.write(text_content)
+                    
+                    # Save also music parameters separately for easy parsing
+                    music_params_file = os.path.join(target_dir, "music_params.txt")
+                    with open(music_params_file, "w", encoding="utf-8") as f:
+                        f.write(full_story)
                     
                     msg = "Your journey is about to unfold."
                 else:
@@ -331,6 +373,22 @@ class EndPage(PageWithBackground):
         tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal).place(x=350, y=550)
 
     def finish_and_signal(self):
+        # Start music integration before closing GUI
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        main_script = os.path.join(script_dir, "main.py")
+        
+        # Launch music player in background
+        try:
+            subprocess.Popen(
+                ["python", main_script, "--music-only"],
+                cwd=script_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            print("🎵 Music player started")
+        except Exception as e:
+            print(f"⚠️ Could not start music player: {e}")
+        
         signal_gui_complete()  # Signal coordinator that GUI is done
         self.controller.root.destroy()
 

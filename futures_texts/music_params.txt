@@ -1,0 +1,19 @@
+[AGE 24]
+Glowing, hammer, sparks, falling, electric, dust, broken, concrete, cracked, vibrant, energy, burst,
+MUSIC: 0.8,0.7,120,0.6,0.5
+
+[AGE 37]
+Worn, leather, jacket, ripped, jeans, dark, alleyway, gritty, shadows, fire, distant, sirens,
+MUSIC: 0.5,0.3,90,0.4,0.7
+
+[AGE 51]
+Silver, beard, tired, eyes, abandoned, warehouse, cold, light, long, coat, steel, girders,
+MUSIC: 0.3,0.2,70,0.2,0.3
+
+[AGE 68]
+Cracked, earth, desolate, landscape, stormy, sky, broken, shield, distant, figure, fading, hope,
+MUSIC: 0.6,0.1,80,0.1,0.8
+
+[DEATH]
+Dust, particles, golden, light, ethereal, glow, shattered, armor, peaceful, smile, cosmic, void,
+MUSIC: 0.2,0.9,60,0.3,0.0

@@ -24,6 +24,7 @@ from face_aging import generate_age_progression
 from camera_to_uv import convert_images_to_uv
 from osc_sender import send_pipeline_complete, send_with_metadata
 from process_coordinator import signal_pipeline_complete
+from shared_config import calculate_num_stages, get_age_increment
 import re
 import time
 import threading
@@ -336,15 +337,22 @@ def run_pipeline():
     try:
         with open(user_data_path, 'r') as f:
             content = f.read().strip()
-        current_age = int(content.split(':')[1].strip())
-    except ValueError:
-        print("Invalid age. Exiting.")
+        # Extract age from the AGE: line
+        for line in content.split('\n'):
+            if line.startswith('AGE:'):
+                current_age = int(line.split(':')[1].strip())
+                break
+        else:
+            raise ValueError("AGE line not found")
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Invalid age or file not found: {e}")
         sys.exit(1)
     
-    # Configuration
-    age_increment = 10
-    num_stages = 5
-    
+    # Configuration - dynamically calculated based on user's age
+    age_increment = get_age_increment()
+    num_stages = calculate_num_stages(current_age)
+
+    print(f"\n🎯 Age-based generation: {num_stages} stages for age {current_age}")
     print(f"\nGenerating ages: ", end="")
     print(", ".join([str(current_age + (i * age_increment)) for i in range(1, num_stages + 1)]))
     print()

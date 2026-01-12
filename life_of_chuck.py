@@ -9,6 +9,7 @@ import threading
 import time
 from google import genai
 from process_coordinator import init_flags, signal_gui_complete, wait_for_pipeline_only
+from shared_config import calculate_num_stages
 
 GEMINI_API_KEY = "AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A"
 
@@ -112,20 +113,24 @@ class LifeOfChuckApp:
                 import re
                 age_match = re.search(r"AGE: (\d+)", data)
                 current_age = int(age_match.group(1)) if age_match else 30
-                
+
+                # Calculate number of stages dynamically based on age
+                num_stages = calculate_num_stages(current_age)
+                num_age_blocks = num_stages  # All blocks represent future ages, last one is DEATH
+
                 client = genai.Client(api_key=GEMINI_API_KEY)
-                
+
                 # PROMPT: Focus su lunghezza minima e virgola dopo ogni parola + parametri musicali
                 prompt = f"""
                 Dati Utente: {data}
                 Età attuale: {current_age}
-                
+
                 OBJECTIVE:
-                Generate exactly 5 raw image prompts for a generative AI WITH MUSIC PARAMETERS.
+                Generate exactly {num_stages} raw image prompts for a generative AI WITH MUSIC PARAMETERS.
                 NO SENTENCES. NO STORY. NO VERBS.
 
                 STRUCTURE:
-                - Exactly 5 blocks: [AGE X] (4 random ages) and [DEATH].
+                - Exactly {num_stages} blocks: [AGE X] ({num_age_blocks - 1} random ages) and [DEATH].
                 - start from the current age, never go below it.
                 - Each block MUST have TWO parts: IMAGE PROMPT and MUSIC PARAMETERS
 

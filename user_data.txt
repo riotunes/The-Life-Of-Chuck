@@ -1,4 +1,4 @@
 AGE: 24
-NAME: Riccardo
-DREAM: safsfas
-BIO: asfasfa
+NAME: Mario
+DREAM: Be a great musical artist
+BIO: I love art and videogames and life

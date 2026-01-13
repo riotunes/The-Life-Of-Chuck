@@ -290,6 +290,63 @@ def plot_all_features_heatmap(tracks: list, save_path: str = None):
     plt.show()
 
 
+def plot_feature_histograms(tracks: list, save_path: str = None):
+    """Istogrammi delle principali feature (incluse le nuove metriche).
+
+    Include: bpm, energy, arousal, valence, danceability (legacy),
+    instrumentalness, acousticness, electronicness.
+    """
+    # Helper to safely extract numeric values
+    def get_series(key: str, *, clip01: bool = False, fallback_key: str | None = None):
+        vals = []
+        for t in tracks:
+            v = t.get(key, None)
+            if v is None and fallback_key is not None:
+                v = t.get(fallback_key, None)
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                continue
+            if clip01:
+                v = max(0.0, min(1.0, v))
+            vals.append(v)
+        return np.array(vals, dtype=float)
+
+    series = [
+        ('BPM', get_series('bpm')),
+        ('Energy', get_series('energy', clip01=True)),
+        ('Arousal', get_series('arousal', clip01=True)),
+        ('Valence', get_series('valence', clip01=True)),
+        ('Danceability (legacy)', get_series('danceability', clip01=True)),
+        ('Instrumentalness', get_series('instrumentalness', clip01=True, fallback_key='danceability')),
+        ('Acousticness', get_series('acousticness', clip01=True)),
+        ('Electronicness', get_series('electronicness', clip01=True, fallback_key='mood_aggressive')),
+    ]
+
+    fig, axes = plt.subplots(2, 4, figsize=(18, 8))
+    axes = axes.flatten()
+
+    for ax, (title, values) in zip(axes, series):
+        if values.size == 0:
+            ax.set_title(f'{title} (no data)')
+            ax.axis('off')
+            continue
+
+        ax.hist(values, bins=30, color='cyan', alpha=0.8)
+        ax.set_title(title)
+        ax.grid(alpha=0.2)
+
+    # Hide any extra axes if we ever change series length
+    for ax in axes[len(series):]:
+        ax.axis('off')
+
+    fig.suptitle('📊 Feature Distributions (Histograms)', fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.show()
+
+
 def plot_3d_valence_arousal_bpm(tracks: list, save_path: str = None):
     """Grafico 3D: Valence (X), Arousal (Y), BPM (Z)."""
     fig = plt.figure(figsize=(12, 10))
@@ -508,9 +565,10 @@ def plot_5d_planes(tracks: list, save_path: str = None):
 
 def main():
     """Funzione principale per generare tutti i grafici."""
-    # Percorso cache
-    CACHE_PATH = "/Users/riccardotocci/Desktop/prototype_the_life_of_chuck/musica/audio/music_analysis_cache.json"
-    OUTPUT_DIR = "/Users/riccardotocci/Desktop/prototype_the_life_of_chuck/musica/plots"
+    # Percorso cache / output (relativi al repo)
+    script_dir = Path(__file__).parent
+    CACHE_PATH = str(script_dir / 'audio' / 'music_analysis_cache.json')
+    OUTPUT_DIR = str(script_dir / 'plots')
     
     # Crea cartella output se non esiste
     Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
@@ -538,6 +596,9 @@ def main():
         
         print("4️⃣  Generando Radar Chart...")
         plot_radar_chart(tracks, save_path=f"{OUTPUT_DIR}/radar_chart.png")
+
+        print("4️⃣b Generando Feature Histograms...")
+        plot_feature_histograms(tracks, save_path=f"{OUTPUT_DIR}/feature_histograms.png")
         
         print("5️⃣  Generando Key Distribution...")
         plot_key_distribution(tracks, f"{OUTPUT_DIR}/key_distribution.png")

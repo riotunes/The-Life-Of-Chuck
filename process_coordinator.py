@@ -68,11 +68,8 @@ def _check_and_send_start():
     if both_complete():
         # Send OSC in separate thread so it doesn't block audio start
         def send_osc_delayed():
-            print("[Coordinator] Both processes complete! Waiting 5s before OSC start...")
-            time.sleep(5.0)  # Delay before sending OSC to TouchDesigner
-            print("[Coordinator] Sending OSC start...")
+            print("[Coordinator] Both processes complete! Sending OSC start immediately...")
             _send_osc_start(msg=0)
-            time.sleep(0.5)
             _send_osc_start(msg=1)
             _cleanup_flags()
         

@@ -239,6 +239,52 @@ class LifeOfChuckApp:
             filepath = os.path.join(target_dir, name)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(text)
+    
+    def reset_app(self):
+        """
+        Riavvia completamente l'applicazione senza chiudere la GUI.
+        Pulisce tutti i dati, resetta tutte le pagine e torna alla StartPage.
+        """
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # 1. Pulisci user_data.txt
+        user_data_path = os.path.join(script_dir, "user_data.txt")
+        if os.path.exists(user_data_path):
+            try:
+                os.remove(user_data_path)
+            except:
+                pass
+        
+        # 2. Pulisci l'immagine catturata
+        self.captured_image = None
+        chuck_origin_path = os.path.join(script_dir, "chuck_origin.jpg")
+        if os.path.exists(chuck_origin_path):
+            try:
+                os.remove(chuck_origin_path)
+            except:
+                pass
+        
+        # 3. Pulisci cartelle di output (aged_outputs, uv_outputs, futures_texts, music_params)
+        folders_to_clean = ["aged_outputs", "uv_outputs", "futures_texts", "music_params"]
+        for folder in folders_to_clean:
+            folder_path = os.path.join(script_dir, folder)
+            if os.path.exists(folder_path):
+                for f in os.listdir(folder_path):
+                    try:
+                        os.remove(os.path.join(folder_path, f))
+                    except:
+                        pass
+        
+        # 4. Resetta tutte le pagine
+        for page_name, page in self.pages.items():
+            if hasattr(page, 'reset_page'):
+                page.reset_page()
+        
+        # 5. Reinizializza i flag di coordinamento
+        init_flags()
+        
+        # 6. Torna alla StartPage
+        self.show_page("StartPage")
 
 # --- STYLING (COSI' COME TI PIACE) ---
 TITLE_FONT = ("Georgia", 38, "italic")
@@ -270,6 +316,15 @@ class CameraPage(PageWithBackground):
         self.canvas.create_window(500, 380, window=self.cam_frame)
         self.btn_frame = tk.Frame(self, bg="black")
         self.canvas.create_window(500, 650, window=self.btn_frame)
+        self.btn_capture = tk.Button(self.btn_frame, text="CAPTURE THE PRESENT", **BUTTON_STYLE, command=self.capture_action)
+        self.btn_capture.grid(row=0, column=0)
+
+    def reset_page(self):
+        """Resetta la pagina allo stato iniziale."""
+        self.is_previewing = False
+        # Rimuovi tutti i widget dal btn_frame e ricrea il bottone capture
+        for widget in self.btn_frame.winfo_children():
+            widget.destroy()
         self.btn_capture = tk.Button(self.btn_frame, text="CAPTURE THE PRESENT", **BUTTON_STYLE, command=self.capture_action)
         self.btn_capture.grid(row=0, column=0)
 
@@ -321,6 +376,10 @@ class QuestionBase(PageWithBackground):
         self.canvas.create_window(500, 420, window=self.entry, height=60, width=500)
         tk.Button(self, text="CONTINUE", **BUTTON_STYLE, command=self.save_and_next).place(x=350, y=560)
 
+    def reset_page(self):
+        """Resetta la pagina svuotando il campo di input."""
+        self.entry.delete(0, tk.END)
+
     def save_and_next(self):
         script_dir = os.path.dirname(os.path.abspath(__file__))
         user_data_path = os.path.join(script_dir, "user_data.txt")
@@ -363,6 +422,18 @@ class EndPage(PageWithBackground):
         self.status_label = self.canvas.create_text(500, 400, text="Looking at your path among the stars", font=TITLE_FONT, fill="white")
         self.music_ready = False
         self.music_process = None
+        self.finish_button = None
+
+    def reset_page(self):
+        """Resetta la pagina allo stato iniziale."""
+        self.music_ready = False
+        self.music_process = None
+        # Rimuovi il bottone FINISH se esiste
+        if self.finish_button:
+            self.finish_button.destroy()
+            self.finish_button = None
+        # Resetta il testo dello status
+        self.canvas.itemconfig(self.status_label, text="Looking at your path among the stars")
 
     def generate_future_timeline(self):
         self.controller.fetch_gemini_bio(self.on_complete)
@@ -370,13 +441,12 @@ class EndPage(PageWithBackground):
     def on_complete(self, message):
         # Text generation complete, now wait for aging pipeline
         self.canvas.itemconfig(self.status_label, text=message)
-        #self.canvas.create_text(500, 460, text="Waiting for aging process...", font=("Georgia", 18, "italic"), fill="white", tags="waiting")
 
-        # Start pre-loading music in background (while waiting for pipeline)
+        # Start pre-loading music in background (analysis only)
         threading.Thread(target=self.preload_music, daemon=True).start()
         
-        # Start waiting for pipeline in background thread
-        threading.Thread(target=self.wait_for_pipeline, daemon=True).start()
+        # Wait for both: pipeline + music analysis
+        threading.Thread(target=self.wait_for_pipeline_and_music, daemon=True).start()
 
     def preload_music(self):
         """Pre-load music analysis in background so it's ready when FINISH is pressed."""
@@ -384,80 +454,71 @@ class EndPage(PageWithBackground):
             script_dir = os.path.dirname(os.path.abspath(__file__))
             main_script = os.path.join(script_dir, "main.py")
             
-            print("🎵 Pre-loading music in background...")
-            # Run pre-analysis (this builds cache)
+            print("🎵 Pre-loading music in background (analysis only)...")
             result = subprocess.run(
                 ["python", main_script, "--analyze-only"],
                 cwd=script_dir,
                 capture_output=True,
                 text=True,
-                timeout=120  # 2 minute timeout
+                timeout=180  # 3 minute timeout
             )
             
             if result.returncode == 0:
-                print("✅ Music pre-loaded and ready!")
+                print("✅ Music pre-analysis complete (cache ready)")
                 self.music_ready = True
             else:
-                print(f"⚠️ Music pre-load warning: {result.stderr[:100] if result.stderr else 'unknown'}")
-                self.music_ready = True  # Continue anyway
+                print(f"⚠️ Music pre-analysis warning: {result.stderr[:200] if result.stderr else 'unknown'}")
+                self.music_ready = True  # allow proceeding anyway
         except Exception as e:
-            print(f"⚠️ Music pre-load error: {e}")
-            self.music_ready = True  # Continue anyway
+            print(f"⚠️ Music pre-analysis error: {e}")
+            self.music_ready = True  # allow proceeding anyway
 
-    def wait_for_pipeline(self):
-        """Wait for aging pipeline to complete, then show FINISH button."""
-        # Wait for pipeline (timeout 5 minutes)
+    def wait_for_pipeline_and_music(self):
+        """Wait for aging pipeline to complete AND music analysis to be ready."""
         pipeline_done = wait_for_pipeline_only(timeout=300, check_interval=1.0)
-
-        # Update UI on main thread
-        if pipeline_done:
-            self.controller.root.after(0, self.show_finish_button)
-        else:
-            self.controller.root.after(0, self.show_timeout_message)
+        if not pipeline_done:
+            # pipeline timeout -> still allow finish, but log
+            print("[Coordinator] Pipeline timed out, allowing Finish.")
+        # Wait until music_ready flag is true
+        while not self.music_ready:
+            time.sleep(0.5)
+        # Show finish on main thread
+        self.controller.root.after(0, self.show_finish_button)
 
     def show_finish_button(self):
         """Show the FINISH button (called when both processes are done)."""
         self.canvas.delete("waiting")
-        #self.canvas.create_text(500, 460, text="All processes complete!", font=("Georgia", 18, "italic"), fill="white")
-        tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal).place(x=350, y=550)
-
-    def show_timeout_message(self):
-        """Show timeout message if pipeline didn't complete."""
-        self.canvas.delete("waiting")
-        #self.canvas.create_text(500, 460, text="Aging process timed out. You can still finish.", font=("Georgia", 16, "italic"), fill="orange")
-        tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal).place(x=350, y=550)
+        self.finish_button = tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal)
+        self.finish_button.place(x=350, y=550)
 
     def finish_and_signal(self):
-        # Start music IMMEDIATELY - subprocess.Popen returns instantly
+        # Nascondi il bottone FINISH dopo che è stato premuto
+        if self.finish_button:
+            self.finish_button.destroy()
+            self.finish_button = None
+        
+        # Avvia integrazione musica (selezione + invio sequenziale a SC)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         main_script = os.path.join(script_dir, "main.py")
-        
-        # Launch music player - don't capture output for faster startup
         try:
-            # Use os.setsid on Unix to detach process completely
-            import os as os_module
             self.music_process = subprocess.Popen(
-                ["python", "-u", main_script, "--music-only"],  # -u for unbuffered output
+                ["python", "-u", main_script, "--music-only"],
                 cwd=script_dir,
-                stdout=None,  # Don't capture - faster
+                stdout=None,
                 stderr=None,
-                start_new_session=True  # Detach from parent
+                start_new_session=True
             )
-            print("🎵 Music player launched!")
+            print("🎵 Music integration launched (sending playlist to SuperCollider)...")
         except Exception as e:
-            print(f"⚠️ Could not start music player: {e}")
-        
-        # Send OSC messages with delay using subprocess (survives GUI close)
+            print(f"⚠️ Could not start music integration: {e}")
+
+        # OSC verso TouchDesigner immediati
         osc_code = '''
-import time
 from pythonosc import udp_client
-print("[OSC] Waiting 5s before sending start...")
-time.sleep(5.0)
 client = udp_client.SimpleUDPClient("127.0.0.1", 9000)
 client.send_message("/touchdesigner/start", 0)
-time.sleep(0.5)
 client.send_message("/touchdesigner/start", 1)
-print("[OSC] Sent: /touchdesigner/start")
+print("[OSC] Sent: /touchdesigner/start (0 and 1)")
 '''
         subprocess.Popen(
             ["python", "-c", osc_code],
@@ -466,9 +527,13 @@ print("[OSC] Sent: /touchdesigner/start")
             stderr=None,
             start_new_session=True
         )
-        
-        signal_gui_complete()  # Signal coordinator that GUI is done
-        self.controller.root.destroy()
+
+        # Segnala GUI completa ma NON chiude la finestra
+        signal_gui_complete()
+
+        # Mostra messaggio e nascondi elementi, poi programma il reset dopo 2:30 (150 secondi)
+        self.canvas.itemconfig(self.status_label, text="")
+        self.controller.root.after(150_000, self.controller.reset_app)
 
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))

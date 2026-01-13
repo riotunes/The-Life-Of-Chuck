@@ -13,11 +13,19 @@ from shared_config import calculate_num_stages
 
 GEMINI_API_KEY = "AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A"
 
+APP_WIDTH = 1920
+APP_HEIGHT = 1080
+CENTER_X = APP_WIDTH // 2
+CENTER_Y = APP_HEIGHT // 2
+# Shift UI elements slightly further left for better visual centering on wide screens
+UI_CENTER_X = CENTER_X - int(APP_WIDTH * 0.10)
+
 class LifeOfChuckApp:
     def __init__(self, root):
         self.root = root
         self.root.title("The Life of Chuck")
-        self.root.geometry("1000x800")
+        self.root.geometry(f"{APP_WIDTH}x{APP_HEIGHT}")
+        self.root.attributes("-fullscreen", True)
         self.root.configure(bg="black")
         
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +40,8 @@ class LifeOfChuckApp:
         
         self.container = tk.Frame(self.root, bg="black")
         self.container.pack(fill="both", expand=True)
+        self.container.grid_rowconfigure(0, weight=1)
+        self.container.grid_columnconfigure(0, weight=1)
         
         self.pages = {}
         page_list = (StartPage, CameraPage, AgePage , NamePage, DreamPage, BioPage, EndPage)
@@ -74,7 +84,7 @@ class LifeOfChuckApp:
             for f in files:
                 try:
                     img = Image.open(os.path.join(self.bg_folder, f))
-                    img = img.resize((1000, 800), Image.Resampling.LANCZOS)
+                    img = img.resize((APP_WIDTH, APP_HEIGHT), Image.Resampling.LANCZOS)
                     self.bg_frames.append(ImageTk.PhotoImage(img))
                 except:
                     continue
@@ -85,7 +95,7 @@ class LifeOfChuckApp:
             for page in self.pages.values():
                 page.canvas.itemconfig(page.bg_image_item, image=next_img)
             self.current_frame = (self.current_frame + 1) % len(self.bg_frames)
-        self.root.after(120, self.animate_background)
+        self.root.after(30, self.animate_background)
 
     def show_page(self, page_name):
         frame = self.pages[page_name]
@@ -127,7 +137,7 @@ class LifeOfChuckApp:
 
                 OBJECTIVE:
                 Generate exactly {num_stages} raw image prompts for a generative AI WITH MUSIC PARAMETERS.
-                NO SENTENCES. NO STORY. NO VERBS.
+                JUST SENTENCES
 
                 STRUCTURE:
                 - Exactly {num_stages} blocks: [AGE X] ({num_age_blocks - 1} random ages) and [DEATH].
@@ -135,28 +145,29 @@ class LifeOfChuckApp:
                 - Each block MUST have TWO parts: IMAGE PROMPT and MUSIC PARAMETERS
 
                 STRICT FORMAT RULES:
-                1. WORDS: Each image prompt must have EXACTLY 12 words.
+                1. SENTENCES: Each image prompt must have exactly 7 sentences.
                 2. CONTENT: Only visual nouns and adjectives.
                 3. BANNED: No 'is', 'has', 'the', 'with', 'a', 'of', 'in', 'to'. No verbs.
                 4. PUNCTUATION: Every single word MUST be followed by a comma.
                 5. NO PERIODS: Zero dots. Only commas.
                 6. FOCUS: Lighting, materials, atmosphere, specific objects.
                 7. REALISM: Include decay, shadows, and gritty details.
-                8. MUSIC: After image prompt, add a line with MUSIC: arousal,valence,bpm,danceability,aggressive
+                8. MUSIC: After image prompt, add a line with MUSIC: arousal,valence,bpm, acousticness, instrumentalness
 
                 MUSIC PARAMETERS (all values 0.0-1.0 except BPM which is 60-180):
                 - arousal: energy/activation level (0=calm, 1=intense)
                 - valence: positivity (0=sad/negative, 1=happy/positive)
                 - bpm: tempo in beats per minute (60-180)
-                - danceability: rhythmic quality (0=not danceable, 1=very danceable)
-                - aggressive: tension/intensity (0=gentle, 1=aggressive)
+                - acousticness: presence of acoustic sounds (0=electronic, 1=acoustic)
+                - instrumentalness: presence of instrumental sounds (0=with vocals, 1=instrumental)
 
                 EXAMPLE OF DESIRED OUTPUT:
                 [AGE 42]
-                Rusty, metal, flickering, neon, blue, rain, wet, pavement, silhouette, cinematic, fog, smoke,
-                MUSIC: 0.6,0.4,100,0.5,0.3
+                Glass walls. A heavy oak desk. The smell of expensive leather and stale coffee. Outside, the city is a grid of cold, indifferent lights.
+                MUSIC: 0.6,0.2,100,0.5,0.3
 
                 """
+
                 
                 response = client.models.generate_content(
                     model="gemini-2.0-flash", 
@@ -287,24 +298,30 @@ class LifeOfChuckApp:
         self.show_page("StartPage")
 
 # --- STYLING (COSI' COME TI PIACE) ---
-TITLE_FONT = ("Georgia", 38, "italic")
-ENTRY_FONT = ("Georgia", 22)
-BUTTON_STYLE = {"font": ("Georgia", 11, "bold"), "width": 25, "height": 2, "bg": "white", "fg": "black", "relief": "flat"}
+TITLE_FONT = ("DejaVu Sans Mono", 48, "bold")
+ENTRY_FONT = ("DejaVu Sans Mono", 26, "normal")
+BUTTON_STYLE = {"font": ("DejaVu Sans Mono", 14, "bold"), "width": 28, "height": 2, "bg": "white", "fg": "black", "relief": "flat"}
 
 class PageWithBackground(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
-        self.canvas = tk.Canvas(self, width=1000, height=800, highlightthickness=0, bg="black")
+        self.canvas = tk.Canvas(self, width=APP_WIDTH, height=APP_HEIGHT, highlightthickness=0, bg="black")
         self.canvas.pack(fill="both", expand=True)
         self.bg_image_item = self.canvas.create_image(0, 0, anchor="nw")
+
+    def create_outlined_text(self, x, y, text, font, fill="white", outline="black", outline_width=2, **kwargs):
+        # Draw a simple outline by rendering the text slightly offset in four directions
+        for dx, dy in ((-outline_width, 0), (outline_width, 0), (0, -outline_width), (0, outline_width)):
+            self.canvas.create_text(x + dx, y + dy, text=text, font=font, fill=outline, anchor="center", **kwargs)
+        return self.canvas.create_text(x, y, text=text, font=font, fill=fill, anchor="center", **kwargs)
 
 class StartPage(PageWithBackground):
     def __init__(self, parent, controller):
         super().__init__(parent, controller)
-        self.canvas.create_text(500, 300, text="The Life of Chuck", font=TITLE_FONT, fill="white")
+        self.create_outlined_text(UI_CENTER_X, int(APP_HEIGHT * 0.35), text="The Life of Chuck", font=TITLE_FONT, fill="white")
         btn = tk.Button(self, text="BEGIN THE JOURNEY", **BUTTON_STYLE, command=lambda: controller.show_page("CameraPage"))
-        self.canvas.create_window(500, 520, window=btn)
+        self.canvas.create_window(UI_CENTER_X, int(APP_HEIGHT * 0.65), window=btn, anchor="center")
 
 class CameraPage(PageWithBackground):
     def __init__(self, parent, controller):
@@ -313,9 +330,9 @@ class CameraPage(PageWithBackground):
         self.cam_frame = tk.Frame(self, bg="white", padx=2, pady=2)
         self.cam_view = tk.Label(self.cam_frame, bg="black")
         self.cam_view.pack()
-        self.canvas.create_window(500, 380, window=self.cam_frame)
+        self.canvas.create_window(UI_CENTER_X, int(APP_HEIGHT * 0.47), window=self.cam_frame, anchor="center")
         self.btn_frame = tk.Frame(self, bg="black")
-        self.canvas.create_window(500, 650, window=self.btn_frame)
+        self.canvas.create_window(UI_CENTER_X, int(APP_HEIGHT * 0.8), window=self.btn_frame, anchor="center")
         self.btn_capture = tk.Button(self.btn_frame, text="CAPTURE THE PRESENT", **BUTTON_STYLE, command=self.capture_action)
         self.btn_capture.grid(row=0, column=0)
 
@@ -347,7 +364,7 @@ class CameraPage(PageWithBackground):
             self.btn_capture.grid_remove()
             
             retake_style = BUTTON_STYLE.copy()
-            retake_style.update({"width": 12, "bg": "#444", "fg": "white", "text": "RETAKE"})
+            retake_style.update({"width": 12, "bg": "white", "fg": "black", "text": "RETAKE"})
             confirm_style = BUTTON_STYLE.copy()
             confirm_style.update({"width": 12, "text": "CONFIRM"})
             
@@ -371,10 +388,10 @@ class QuestionBase(PageWithBackground):
     def __init__(self, parent, controller, question_text, key, next_page):
         super().__init__(parent, controller)
         self.key, self.next_page = key, next_page
-        self.canvas.create_text(500, 300, text=question_text, font=TITLE_FONT, fill="white", width=800)
+        self.create_outlined_text(UI_CENTER_X, int(APP_HEIGHT * 0.35), text=question_text, font=TITLE_FONT, fill="white", width=APP_WIDTH * 0.7)
         self.entry = tk.Entry(self, font=ENTRY_FONT, bg="#111", fg="white", border=0, justify="center")
-        self.canvas.create_window(500, 420, window=self.entry, height=60, width=500)
-        tk.Button(self, text="CONTINUE", **BUTTON_STYLE, command=self.save_and_next).place(x=350, y=560)
+        self.canvas.create_window(UI_CENTER_X, int(APP_HEIGHT * 0.5), window=self.entry, height=60, width=600, anchor="center")
+        tk.Button(self, text="CONTINUE", **BUTTON_STYLE, command=self.save_and_next).place(x=UI_CENTER_X, y=int(APP_HEIGHT * 0.7), anchor="center")
 
     def reset_page(self):
         """Resetta la pagina svuotando il campo di input."""
@@ -419,7 +436,7 @@ class BioPage(QuestionBase):
 class EndPage(PageWithBackground):
     def __init__(self, parent, controller):
         super().__init__(parent, controller)
-        self.status_label = self.canvas.create_text(500, 400, text="Looking at your path among the stars", font=TITLE_FONT, fill="white")
+        self.status_label = self.create_outlined_text(UI_CENTER_X, int(APP_HEIGHT * 0.55), text="Looking at your path among the stars", font=TITLE_FONT, fill="white")
         self.music_ready = False
         self.music_process = None
         self.finish_button = None
@@ -489,7 +506,7 @@ class EndPage(PageWithBackground):
         """Show the FINISH button (called when both processes are done)."""
         self.canvas.delete("waiting")
         self.finish_button = tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal)
-        self.finish_button.place(x=350, y=550)
+        self.finish_button.place(x=UI_CENTER_X, y=int(APP_HEIGHT * 0.7), anchor="center")
 
     def finish_and_signal(self):
         # Nascondi il bottone FINISH dopo che è stato premuto

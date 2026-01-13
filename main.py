@@ -22,7 +22,7 @@ if not os.environ.get("GEMINI_API_KEY"):
 from camera_capture import capture_face
 from face_aging import generate_age_progression
 from camera_to_uv import convert_images_to_uv
-from osc_sender import send_pipeline_complete, send_with_metadata
+from osc_sender import send_pipeline_complete, send_with_metadata, send_num_stages
 from process_coordinator import signal_pipeline_complete
 from shared_config import calculate_num_stages, get_age_increment
 import re

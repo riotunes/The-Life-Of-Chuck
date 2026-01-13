@@ -125,7 +125,7 @@ def _build_playlist(analyzer, music_params):
         analyzer=analyzer,
         osc_ip="0.0.0.0",
         osc_port=9001,
-        playback_duration=30.0
+        playback_duration=1.0
     )
 
     playlist = []
@@ -220,7 +220,7 @@ def start_music_integration():
         playlist,
         ip="127.0.0.1",
         port=57120,
-        segment_dur=30.0,
+        segment_dur=2.0,
         lead=1.0
     )
     print("🎵 Playlist pronta su SuperCollider (30s a traccia, crossfade gestito in SC).")

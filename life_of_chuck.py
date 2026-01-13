@@ -533,9 +533,22 @@ print("[OSC] Sent: /touchdesigner/start (0 and 1)")
         # Segnala GUI completa ma NON chiude la finestra
         signal_gui_complete()
 
-        # Mostra messaggio e nascondi elementi, poi programma il reset dopo 2:30 (150 secondi)
+        # Calcola num_stages dall'età per determinare il tempo di attesa
+        import re
+        user_data_path = os.path.join(script_dir, "user_data.txt")
+        try:
+            with open(user_data_path, "r", encoding="utf-8") as f:
+                data = f.read()
+            age_match = re.search(r"AGE: (\d+)", data)
+            current_age = int(age_match.group(1)) if age_match else 30
+            num_stages = calculate_num_stages(current_age)
+        except:
+            num_stages = 5  # fallback
+
+        # Mostra messaggio e nascondi elementi, poi programma il reset dopo num_stages * 30 secondi
+        wait_time_ms = num_stages * 30 * 1000  # millisecondi
         self.canvas.itemconfig(self.status_label, text="")
-        self.controller.root.after(150_000, self.controller.reset_app)
+        self.controller.root.after(wait_time_ms, self.controller.reset_app)
 
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))

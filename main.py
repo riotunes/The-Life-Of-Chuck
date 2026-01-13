@@ -29,13 +29,6 @@ import time
 import threading
 from pathlib import Path
 
-
-# Output directories
-CAPTURES_DIR = "captures"
-AGED_DIR = "aged_outputs"
-UV_DIR = "uv_outputs"
-FUTURES_DIR = "futures_texts"
-
 # Music integration
 MUSIC_SCORE_AVAILABLE = False
 try:
@@ -46,6 +39,19 @@ except ImportError as e:
     print(f"Warning: music_score not available: {e}")
     MUSIC_SCORE_AVAILABLE = False
 
+# OSC client for SuperCollider
+try:
+    from pythonosc import udp_client
+    OSC_CLIENT_AVAILABLE = True
+except ImportError:
+    OSC_CLIENT_AVAILABLE = False
+    print("⚠️ python-osc non installato. Installa con: pip install python-osc")
+
+# Output directories
+CAPTURES_DIR = "captures"
+AGED_DIR = "aged_outputs"
+UV_DIR = "uv_outputs"
+FUTURES_DIR = "futures_texts"
 
 
 def clear_directory(directory):
@@ -109,47 +115,18 @@ def parse_music_params_from_gemini():
     return music_params
 
 
-def start_music_player_thread(music_params, silent=False):
-    """Start music player in separate thread with pre-calculated tracks and crossfade."""
-    if not MUSIC_SCORE_AVAILABLE:
-        if not silent:
-            print("\n⚠️ Music player not available, skipping music integration")
-        return None
-    
-    try:
-        import numpy as np
-        import sounddevice as sd
-        from essentia.standard import MonoLoader
-    except ImportError as e:
-        if not silent:
-            print(f"\n⚠️ Audio playback not available: {e}")
-        return None
-    
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    audio_folder = os.path.join(script_dir, "musica", "audio")
-    
-    if not os.path.exists(audio_folder):
-        if not silent:
-            print(f"⚠️ Audio folder not found: {audio_folder}")
-        return None
-    
-    # ===== PRE-CALCULATE ALL TRACKS BEFORE PLAYBACK =====
-    if not silent:
-        print("\n[MUSIC] Preparing tracks...")
-    
-    # Initialize analyzer (uses cache if available)
-    analyzer = MusicAnalyzer(audio_folder)
-    analyzer.analyze()
-    
-    # Create player for calculations
+def _build_playlist(analyzer, music_params):
+    """
+    Usa MusicPlayer per scegliere i brani più vicini ai parametri.
+    Ritorna una lista di dict con path e filename.
+    """
     player = MusicPlayer(
         analyzer=analyzer,
         osc_ip="0.0.0.0",
         osc_port=9001,
         playback_duration=30.0
     )
-    
-    # Pre-calculate all closest tracks
+
     playlist = []
     for idx, params in enumerate(music_params):
         closest = player.find_closest_track(
@@ -159,7 +136,6 @@ def start_music_player_thread(music_params, silent=False):
             danceability=params['danceability'],
             aggressive=params['aggressive']
         )
-        
         if closest:
             playlist.append({
                 'path': closest.get('path', ''),
@@ -167,136 +143,110 @@ def start_music_player_thread(music_params, silent=False):
                 'params': params,
                 'scene': idx + 1
             })
-            if not silent:
-                print(f"  Scene {idx + 1}: {closest.get('filename', 'Unknown')[:40]}")
+            print(f"  Scene {idx + 1}: {closest.get('filename', 'Unknown')[:60]}")
         else:
-            if not silent:
-                print(f"  Scene {idx + 1}: No track found!")
-    
-    if not playlist:
-        if not silent:
-            print("❌ No tracks found for any scene!")
-        return None
-    
-    if not silent:
-        print(f"✅ {len(playlist)} tracks ready")
-    
-    # ===== PRE-LOAD ALL AUDIO =====
-    if not silent:
-        print("[MUSIC] Loading audio...")
-    
-    sample_rate = 44100
-    duration = 30.0  # 30 seconds per track
-    crossfade_duration = 2.0  # 2 second crossfade
-    crossfade_samples = int(crossfade_duration * sample_rate)
-    
-    audio_segments = []
-    for item in playlist:
-        try:
-            loader = MonoLoader(filename=item['path'], sampleRate=sample_rate)
-            audio = loader()
-            
-            # Find first onset for better start point
-            try:
-                from essentia.standard import OnsetRate
-                onset_rate = OnsetRate()
-                onsets, _ = onset_rate(audio)
-                start_time = float(onsets[0]) if len(onsets) > 0 else 0.0
-            except:
-                start_time = 0.0
-            
-            start_sample = int(start_time * sample_rate)
-            # Get 30 seconds + crossfade buffer
-            end_sample = start_sample + int((duration + crossfade_duration) * sample_rate)
-            
-            if start_sample >= len(audio):
-                start_sample = 0
-            end_sample = min(end_sample, len(audio))
-            
-            segment = audio[start_sample:end_sample]
-            audio_segments.append(segment)
-        except Exception as e:
-            if not silent:
-                print(f"  ❌ Error loading {item['filename']}: {e}")
-            audio_segments.append(np.zeros(int(duration * sample_rate)))
-    
-    if not silent:
-        print("✅ Ready!")
-    
-    # ===== PLAYBACK WITH SMOOTH CROSSFADE =====
-    def music_loop():
-        try:
-            import numpy as np
-            import sounddevice as sd
-            from pythonosc import udp_client
-            
-            # FADE PARAMETERS - longer for smoother transitions
-            fade_in_sec = 2.0    # 2 second fade in
-            fade_out_sec = 3.0   # 3 second fade out
-            scene_duration = 30.0  # Each scene is exactly 30 seconds
-            
-            for idx, (item, segment) in enumerate(zip(playlist, audio_segments)):
-                # Ensure we have enough audio for 30 seconds + fade buffer
-                total_needed = int((scene_duration + fade_out_sec) * sample_rate)
-                
-                if len(segment) < total_needed:
-                    # Pad with silence if needed
-                    audio_full = np.zeros(total_needed)
-                    audio_full[:len(segment)] = segment
-                else:
-                    audio_full = segment[:total_needed].copy()
-                
-                # Apply fade in (longer for smooth entry)
-                fade_in_samples = int(fade_in_sec * sample_rate)
-                if idx == 0:
-                    # First track: quick fade in to start fast
-                    fade_in_samples = int(0.3 * sample_rate)  # 300ms
-                fade_in = np.linspace(0, 1, fade_in_samples)
-                audio_full[:fade_in_samples] *= fade_in
-                
-                # Apply fade out at end
-                fade_out_samples = int(fade_out_sec * sample_rate)
-                if idx < len(playlist) - 1:
-                    # Gradual fade out starting before scene ends
-                    fade_start = int((scene_duration - fade_out_sec) * sample_rate)
-                    fade_out = np.linspace(1, 0, fade_out_samples)
-                    if fade_start >= 0:
-                        audio_full[fade_start:fade_start + fade_out_samples] *= fade_out
-                else:
-                    # Last track: fade out at end
-                    fade_start = int((scene_duration - fade_out_sec) * sample_rate)
-                    fade_out = np.linspace(1, 0, fade_out_samples)
-                    if fade_start >= 0:
-                        audio_full[fade_start:fade_start + fade_out_samples] *= fade_out
-                    audio_full = audio_full[:int(scene_duration * sample_rate)]
-                
-                # Play audio IMMEDIATELY
-                sd.play(audio_full, sample_rate)
-                
-                # Print scene info after audio starts
-                print(f"[SCENE {item['scene']}/{len(playlist)}] {item['filename'][:35]}...")
-                
-                # Wait exactly 30 seconds for this scene
-                time.sleep(scene_duration)
-                
-                # For last track, wait for fade to finish
-                if idx == len(playlist) - 1:
-                    time.sleep(1.0)
-            
-            sd.stop()
-            print("✅ Music finished.")
-            
-        except Exception as e:
-            print(f"❌ Error: {e}")
-            import traceback
-            traceback.print_exc()
-            sd.stop()
-    
-    # Start thread - music starts IMMEDIATELY
-    music_thread = threading.Thread(target=music_loop, daemon=False)
-    music_thread.start()
-    return music_thread
+            print(f"  Scene {idx + 1}: No track found!")
+    return playlist
 
+
+def _send_playlist_sequenced(playlist, ip="127.0.0.1", port=57120,
+                             segment_dur=30.0, lead=1.0):
+    """
+    Invia i path a SuperCollider in sequenza:
+    - primo subito
+    - poi uno ogni (segment_dur - lead) secondi (default 29s)
+    Processo bloccante: garantisce che tutti i messaggi vengano inviati prima di uscire.
+    """
+    if not OSC_CLIENT_AVAILABLE:
+        print("❌ python-osc non disponibile, impossibile inviare a SuperCollider.")
+        return False
+    if not playlist:
+        print("⚠️ Playlist vuota, niente da inviare.")
+        return False
+
+    client = udp_client.SimpleUDPClient(ip, port)
+
+    try:
+        for idx, item in enumerate(playlist):
+            path = item.get('path', '')
+            if not path:
+                continue
+            client.send_message("/addFile", path)
+            print(f"➡️  [SC] /addFile {path} (scene {idx+1}/{len(playlist)})")
+            if idx < len(playlist) - 1:
+                wait_time = max(1.0, segment_dur - lead)  # es. 29s
+                time.sleep(wait_time)
+        print("✅ Playlist inviata a SuperCollider (sequenziale).")
+        return True
+    except KeyboardInterrupt:
+        print("⏹️ Interrotto dall’utente.")
+        return False
+
+
+def start_music_integration():
+    """
+    Seleziona i brani (in base ai parametri Gemini) e invia la playlist a SuperCollider.
+    Non riproduce audio in Python.
+    """
+    if not MUSIC_SCORE_AVAILABLE:
+        print("\n⚠️ Music analyzer not available, skipping music integration")
+        return
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    audio_folder = os.path.join(script_dir, "musica", "audio")
+    
+    if not os.path.exists(audio_folder):
+        print(f"⚠️ Audio folder not found: {audio_folder}")
+        return
+    
+    # 1) Leggi parametri musicali generati
+    music_params = parse_music_params_from_gemini()
+    
+    # 2) Analizza (o carica cache) prima di scegliere i brani
+    print("\n[MUSIC] Analisi/caching brani...")
+    analyzer = MusicAnalyzer(audio_folder)
+    analyzer.analyze()
+    
+    # 3) Costruisci playlist migliore per i parametri
+    print("[MUSIC] Selezione brani per le scene...")
+    playlist = _build_playlist(analyzer, music_params)
+    if not playlist:
+        print("❌ Nessun brano selezionato, interruzione.")
+        return
+    
+    print("[MUSIC] Invio playlist a SuperCollider (scaglionata)...")
+    _send_playlist_sequenced(
+        playlist,
+        ip="127.0.0.1",
+        port=57120,
+        segment_dur=30.0,
+        lead=1.0
+    )
+    print("🎵 Playlist pronta su SuperCollider (30s a traccia, crossfade gestito in SC).")
+
+
+def pre_analyze_music():
+    """Pre-analyze music files at startup to build cache."""
+    if not MUSIC_SCORE_AVAILABLE:
+        print("\n⚠️ Music analyzer not available")
+        return
+    
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        audio_folder = os.path.join(script_dir, "musica", "audio")
+        
+        if not os.path.exists(audio_folder):
+            print(f"⚠️ Audio folder not found: {audio_folder}")
+            return
+        
+        print("\n[MUSIC] Pre-analyzing audio files...")
+        print("-" * 40)
+        analyzer = MusicAnalyzer(audio_folder)
+        analyzer.analyze()
+        print("✅ Music analysis complete and cached!\n")
+    
+    except Exception as e:
+        print(f"⚠️ Error during pre-analysis: {e}")
 
 
 def run_pipeline():
@@ -381,7 +331,6 @@ def run_pipeline():
     print()
     
     # Summary
-    # Summary
     print("=" * 50)
     print("   PIPELINE COMPLETE")
     print("=" * 50)
@@ -399,12 +348,6 @@ def run_pipeline():
     print("[OSC] Notifying TouchDesigner...")
     print("-" * 40)
     
-    # Simple version - just send completion flag
-    # send_pipeline_complete(ip="127.0.0.1", port=9000)
-    
-    # Or with metadata - sends both completion flag and texture count
-    
-
     # Signal to coordinator that pipeline is complete
     signal_pipeline_complete()
     
@@ -414,61 +357,16 @@ def run_pipeline():
     print("\nMusic will start when you press FINISH in the GUI\n")
 
 
-def start_music_integration():
-    """Start music player - called externally after FINISH button is pressed."""
-    # Parse music parameters FIRST (fast)
-    music_params = parse_music_params_from_gemini()
-    
-    # Start music player - audio starts IMMEDIATELY
-    music_thread = start_music_player_thread(music_params, silent=True)
-    
-    if music_thread:
-        # Print info AFTER audio has started
-        time.sleep(0.1)  # Small delay to ensure audio is playing
-        print(f"🎵 Playing {len(music_params)} scenes (30s each)")
-        
-        try:
-            music_thread.join()
-        except KeyboardInterrupt:
-            print("\n🛑 Stopped")
-            try:
-                import sounddevice as sd
-                sd.stop()
-            except:
-                pass
-    else:
-        print("Music player not available")
-
-
-def pre_analyze_music():
-    """Pre-analyze music files at startup to build cache."""
-    if not MUSIC_SCORE_AVAILABLE:
-        print("\n⚠️ Music analyzer not available")
-        return
-    
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        audio_folder = os.path.join(script_dir, "musica", "audio")
-        
-        if not os.path.exists(audio_folder):
-            print(f"⚠️ Audio folder not found: {audio_folder}")
-            return
-        
-        print("\n[MUSIC] Pre-analyzing audio files...")
-        print("-" * 40)
-        analyzer = MusicAnalyzer(audio_folder)
-        analyzer.analyze()
-        print("✅ Music analysis complete and cached!\n")
-    
-    except Exception as e:
-        print(f"⚠️ Error during pre-analysis: {e}")
+def start_music_integration_cli():
+    """Wrapper per CLI (compatibile con --music-only)."""
+    start_music_integration()
 
 
 if __name__ == "__main__":
     # Check command line arguments
     if len(sys.argv) > 1:
         if sys.argv[1] == "--music-only":
-            start_music_integration()
+            start_music_integration_cli()
         elif sys.argv[1] == "--analyze-only":
             pre_analyze_music()
         else:

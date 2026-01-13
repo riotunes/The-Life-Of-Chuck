@@ -106,7 +106,7 @@ def _send_num_stages_to_td(ip="127.0.0.1", port=9001):
 
         # Get number of stages based on user's age
         num_stages = get_num_stages_from_user_data(
-            user_data_path=PROJECT_ROOT / "user_data.txt",
+            user_data_path=str(PROJECT_ROOT / "user_data.txt"),
             default_stages=5
         )
 

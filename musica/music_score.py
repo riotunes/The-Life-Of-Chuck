@@ -516,7 +516,7 @@ class MusicAnalyzer:
         
         # Applica smoothing (bending) alla distribuzione di valence_mode
         # per ottenere un grafico più smussato
-        tracks = self._apply_mode_smoothing(tracks, intensita=0.7)
+        tracks = self._apply_mode_smoothing(tracks, intensita=1.0)
         
         # Normalizza brightness al range [0, 1] basandosi su min/max globale
         tracks = self._normalize_brightness(tracks)
@@ -588,12 +588,28 @@ class MusicAnalyzer:
         mode_array = np.array(mode_values, dtype=float)
         smoothed_values = ammorbidisci_distribuzione(mode_array, intensita)
         
-        # Aggiorna i valori nei tracks
+        # Aggiorna i valori nei tracks e ricalcola valence_pre_penalty e valence
         for idx, smoothed_val in zip(analyzed_indices, smoothed_values):
-            tracks[idx]['valence_mode_original'] = tracks[idx]['valence_mode']
-            tracks[idx]['valence_mode'] = round(float(smoothed_val), 3)
+            t = tracks[idx]
+            t['valence_mode_original'] = t['valence_mode']
+            t['valence_mode'] = round(float(smoothed_val), 3)
+            
+            # Ricalcola valence_pre_penalty con il nuovo valence_mode smoothato
+            if 'valence_brightness' in t and 'valence_dance' in t:
+                new_pre_penalty = (
+                    t['valence_mode'] * 0.35 +
+                    t['valence_brightness'] * 0.40 +
+                    t['valence_dance'] * 0.25
+                )
+                t['valence_pre_penalty_original'] = t.get('valence_pre_penalty', new_pre_penalty)
+                t['valence_pre_penalty'] = round(max(0.0, min(1.0, new_pre_penalty)), 3)
+                
+                # Ricalcola valence (dato che penalty_factor = 1.0, è uguale a pre_penalty)
+                t['valence_original'] = t.get('valence', new_pre_penalty)
+                t['valence'] = t['valence_pre_penalty']
         
         print(f"  🔄 Smoothing applicato a valence_mode (intensità: {intensita})")
+        print(f"  🔄 Ricalcolati valence_pre_penalty e valence per {len(analyzed_indices)} brani")
         return tracks
     
     def _normalize_brightness(self, tracks: List[Dict]) -> List[Dict]:

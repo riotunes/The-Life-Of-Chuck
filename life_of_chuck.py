@@ -514,9 +514,11 @@ class EndPage(PageWithBackground):
 
         # OSC verso TouchDesigner immediati
         osc_code = '''
+import time
 from pythonosc import udp_client
 client = udp_client.SimpleUDPClient("127.0.0.1", 9000)
 client.send_message("/touchdesigner/start", 0)
+time.sleep(0.2)
 client.send_message("/touchdesigner/start", 1)
 print("[OSC] Sent: /touchdesigner/start (0 and 1)")
 '''

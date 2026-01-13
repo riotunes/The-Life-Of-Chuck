@@ -81,7 +81,7 @@ def parse_music_params_from_gemini():
                     content = f.read().strip()
                 
                 # Parse MUSIC: line
-                # Format: MUSIC: arousal,valence,bpm,danceability,aggressive
+                # Format: MUSIC: arousal,valence,bpm,instrumentalness,electronicness
                 match = re.search(r'MUSIC:\s*([0-9.,\s]+)', content)
                 if match:
                     values = [float(x.strip()) for x in match.group(1).strip().split(',')]
@@ -90,8 +90,8 @@ def parse_music_params_from_gemini():
                             'arousal': values[0],
                             'valence': values[1],
                             'bpm': values[2],
-                            'danceability': values[3],
-                            'aggressive': values[4]
+                            'instrumentalness': values[3],
+                            'electronicness': values[4]
                         }
                         music_params.append(params)
         
@@ -99,18 +99,18 @@ def parse_music_params_from_gemini():
             # Fallback to default values if no params found
             print("⚠️ No music parameters found, using defaults")
             music_params = [
-                {'arousal': 0.5, 'valence': 0.5, 'bpm': 100, 'danceability': 0.5, 'aggressive': 0.3},
-                {'arousal': 0.6, 'valence': 0.4, 'bpm': 110, 'danceability': 0.6, 'aggressive': 0.4},
-                {'arousal': 0.7, 'valence': 0.3, 'bpm': 120, 'danceability': 0.5, 'aggressive': 0.5},
-                {'arousal': 0.5, 'valence': 0.2, 'bpm': 90, 'danceability': 0.3, 'aggressive': 0.6},
-                {'arousal': 0.3, 'valence': 0.1, 'bpm': 70, 'danceability': 0.2, 'aggressive': 0.7}
+                {'arousal': 0.5, 'valence': 0.5, 'bpm': 100, 'instrumentalness': 0.5, 'electronicness': 0.3},
+                {'arousal': 0.6, 'valence': 0.4, 'bpm': 110, 'instrumentalness': 0.6, 'electronicness': 0.4},
+                {'arousal': 0.7, 'valence': 0.3, 'bpm': 120, 'instrumentalness': 0.5, 'electronicness': 0.5},
+                {'arousal': 0.5, 'valence': 0.2, 'bpm': 90, 'instrumentalness': 0.3, 'electronicness': 0.6},
+                {'arousal': 0.3, 'valence': 0.1, 'bpm': 70, 'instrumentalness': 0.2, 'electronicness': 0.7}
             ]
     
     except Exception as e:
         print(f"Error parsing music params: {e}")
         # Use default values
         music_params = [
-            {'arousal': 0.5, 'valence': 0.5, 'bpm': 100, 'danceability': 0.5, 'aggressive': 0.3}
+            {'arousal': 0.5, 'valence': 0.5, 'bpm': 100, 'instrumentalness': 0.5, 'electronicness': 0.3}
         ]
     
     return music_params
@@ -134,8 +134,8 @@ def _build_playlist(analyzer, music_params):
             arousal=params['arousal'],
             valence=params['valence'],
             bpm=params['bpm'],
-            danceability=params['danceability'],
-            aggressive=params['aggressive']
+            instrumentalness=params['instrumentalness'],
+            electronicness=params['electronicness']
         )
         if closest:
             playlist.append({
@@ -151,7 +151,7 @@ def _build_playlist(analyzer, music_params):
 
 
 def _send_playlist_sequenced(playlist, ip="127.0.0.1", port=57120,
-                             segment_dur=30.0, lead=1.0):
+                             segment_dur=2.0, lead=1.0):
     """
     Invia i path a SuperCollider in sequenza:
     - primo subito

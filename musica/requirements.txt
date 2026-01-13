@@ -1,0 +1,5 @@
+# Requirements per music_score.py
+# Analisi audio con Essentia
+
+essentia-tensorflow>=2.1b6.dev1110
+numpy>=1.21.0

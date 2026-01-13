@@ -3,11 +3,13 @@ import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
 import os
+import sys
 import subprocess
 import threading
 import time
 from google import genai
 from process_coordinator import init_flags, signal_gui_complete, wait_for_pipeline_only
+from shared_config import calculate_num_stages
 
 GEMINI_API_KEY = "AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A"
 
@@ -42,6 +44,29 @@ class LifeOfChuckApp:
 
         self.show_page("StartPage")
         self.animate_background()
+
+    def start_music_analysis(self):
+        """Start music analysis in background thread at app startup."""
+        def analyze():
+            try:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                main_script = os.path.join(script_dir, "main.py")
+                
+                print("🎵 Starting background music analysis...")
+                # Use Popen instead of run to avoid blocking
+                process = subprocess.Popen(
+                    ["python", main_script, "--analyze-only"],
+                    cwd=script_dir,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE
+                )
+                
+                # Don't wait for completion, just let it run in background
+                print("✅ Music analysis started in background")
+            except Exception as e:
+                print(f"⚠️ Could not start music analysis: {e}")
+        
+        threading.Thread(target=analyze, daemon=True).start()
 
     def load_background_frames(self):
         if os.path.exists(self.bg_folder):
@@ -88,34 +113,48 @@ class LifeOfChuckApp:
                 import re
                 age_match = re.search(r"AGE: (\d+)", data)
                 current_age = int(age_match.group(1)) if age_match else 30
-                
+
+                # Calculate number of stages dynamically based on age
+                num_stages = calculate_num_stages(current_age)
+                num_age_blocks = num_stages  # All blocks represent future ages, last one is DEATH
+
                 client = genai.Client(api_key=GEMINI_API_KEY)
-                
-                # PROMPT: Focus su lunghezza minima e virgola dopo ogni parola
+
+                # PROMPT: Focus su lunghezza minima e virgola dopo ogni parola + parametri musicali
                 prompt = f"""
                 Dati Utente: {data}
                 Età attuale: {current_age}
-                
+
                 OBJECTIVE:
-                Generate exactly 5 raw image prompts for a generative AI. 
+                Generate exactly {num_stages} raw image prompts for a generative AI WITH MUSIC PARAMETERS.
                 NO SENTENCES. NO STORY. NO VERBS.
 
                 STRUCTURE:
-                - Exactly 5 blocks: [AGE X] (4 random ages) and [DEATH].
+                - Exactly {num_stages} blocks: [AGE X] ({num_age_blocks - 1} random ages) and [DEATH].
                 - start from the current age, never go below it.
+                - Each block MUST have TWO parts: IMAGE PROMPT and MUSIC PARAMETERS
 
                 STRICT FORMAT RULES:
-                1. WORDS: Each block must have EXACTLY 12 words.
+                1. WORDS: Each image prompt must have EXACTLY 12 words.
                 2. CONTENT: Only visual nouns and adjectives.
                 3. BANNED: No 'is', 'has', 'the', 'with', 'a', 'of', 'in', 'to'. No verbs.
                 4. PUNCTUATION: Every single word MUST be followed by a comma.
                 5. NO PERIODS: Zero dots. Only commas.
                 6. FOCUS: Lighting, materials, atmosphere, specific objects.
                 7. REALISM: Include decay, shadows, and gritty details.
+                8. MUSIC: After image prompt, add a line with MUSIC: arousal,valence,bpm,danceability,aggressive
+
+                MUSIC PARAMETERS (all values 0.0-1.0 except BPM which is 60-180):
+                - arousal: energy/activation level (0=calm, 1=intense)
+                - valence: positivity (0=sad/negative, 1=happy/positive)
+                - bpm: tempo in beats per minute (60-180)
+                - danceability: rhythmic quality (0=not danceable, 1=very danceable)
+                - aggressive: tension/intensity (0=gentle, 1=aggressive)
 
                 EXAMPLE OF DESIRED OUTPUT:
                 [AGE 42]
                 Rusty, metal, flickering, neon, blue, rain, wet, pavement, silhouette, cinematic, fog, smoke,
+                MUSIC: 0.6,0.4,100,0.5,0.3
 
                 """
                 
@@ -132,18 +171,45 @@ class LifeOfChuckApp:
                         if f_old.startswith("future_") and f_old.endswith(".txt"):
                             os.remove(os.path.join(target_dir, f_old))
 
+                    # Create music_params folder
+                    music_params_dir = os.path.join(script_dir, "music_params")
+                    if not os.path.exists(music_params_dir):
+                        os.makedirs(music_params_dir)
+                    
+                    # Clean old music params
+                    for f_old in os.listdir(music_params_dir):
+                        if f_old.endswith(".txt"):
+                            os.remove(os.path.join(music_params_dir, f_old))
+
                     parts = full_story.split('[')
                     for part in parts:
                         if ']' in part:
                             header, content = part.split(']', 1)
                             clean_header = header.strip().lower().replace(' ', '_')
-                            filename = os.path.join(target_dir, f"future_{clean_header}.txt")
-
-                            # Rimuoviamo eventuali righe vuote e puliamo lo spazio finale
-                            text_content = content.strip()
-
-                            with open(filename, "w", encoding="utf-8") as f:
-                                f.write(text_content)
+                            
+                            # Separate image prompt from music params
+                            lines = content.strip().split('\n')
+                            image_lines = []
+                            music_line = None
+                            
+                            for line in lines:
+                                line = line.strip()
+                                if line.startswith('MUSIC:'):
+                                    music_line = line
+                                elif line:
+                                    image_lines.append(line)
+                            
+                            # Save image prompt to futures_texts
+                            image_filename = os.path.join(target_dir, f"future_{clean_header}.txt")
+                            image_content = '\n'.join(image_lines)
+                            with open(image_filename, "w", encoding="utf-8") as f:
+                                f.write(image_content)
+                            
+                            # Save music params to music_params folder
+                            if music_line:
+                                music_filename = os.path.join(music_params_dir, f"music_{clean_header}.txt")
+                                with open(music_filename, "w", encoding="utf-8") as f:
+                                    f.write(music_line)
                     
                     msg = "Your journey is about to unfold."
                 else:
@@ -173,6 +239,52 @@ class LifeOfChuckApp:
             filepath = os.path.join(target_dir, name)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(text)
+    
+    def reset_app(self):
+        """
+        Riavvia completamente l'applicazione senza chiudere la GUI.
+        Pulisce tutti i dati, resetta tutte le pagine e torna alla StartPage.
+        """
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # 1. Pulisci user_data.txt
+        user_data_path = os.path.join(script_dir, "user_data.txt")
+        if os.path.exists(user_data_path):
+            try:
+                os.remove(user_data_path)
+            except:
+                pass
+        
+        # 2. Pulisci l'immagine catturata
+        self.captured_image = None
+        chuck_origin_path = os.path.join(script_dir, "chuck_origin.jpg")
+        if os.path.exists(chuck_origin_path):
+            try:
+                os.remove(chuck_origin_path)
+            except:
+                pass
+        
+        # 3. Pulisci cartelle di output (aged_outputs, uv_outputs, futures_texts, music_params)
+        folders_to_clean = ["aged_outputs", "uv_outputs", "futures_texts", "music_params"]
+        for folder in folders_to_clean:
+            folder_path = os.path.join(script_dir, folder)
+            if os.path.exists(folder_path):
+                for f in os.listdir(folder_path):
+                    try:
+                        os.remove(os.path.join(folder_path, f))
+                    except:
+                        pass
+        
+        # 4. Resetta tutte le pagine
+        for page_name, page in self.pages.items():
+            if hasattr(page, 'reset_page'):
+                page.reset_page()
+        
+        # 5. Reinizializza i flag di coordinamento
+        init_flags()
+        
+        # 6. Torna alla StartPage
+        self.show_page("StartPage")
 
 # --- STYLING (COSI' COME TI PIACE) ---
 TITLE_FONT = ("Georgia", 38, "italic")
@@ -204,6 +316,15 @@ class CameraPage(PageWithBackground):
         self.canvas.create_window(500, 380, window=self.cam_frame)
         self.btn_frame = tk.Frame(self, bg="black")
         self.canvas.create_window(500, 650, window=self.btn_frame)
+        self.btn_capture = tk.Button(self.btn_frame, text="CAPTURE THE PRESENT", **BUTTON_STYLE, command=self.capture_action)
+        self.btn_capture.grid(row=0, column=0)
+
+    def reset_page(self):
+        """Resetta la pagina allo stato iniziale."""
+        self.is_previewing = False
+        # Rimuovi tutti i widget dal btn_frame e ricrea il bottone capture
+        for widget in self.btn_frame.winfo_children():
+            widget.destroy()
         self.btn_capture = tk.Button(self.btn_frame, text="CAPTURE THE PRESENT", **BUTTON_STYLE, command=self.capture_action)
         self.btn_capture.grid(row=0, column=0)
 
@@ -255,6 +376,10 @@ class QuestionBase(PageWithBackground):
         self.canvas.create_window(500, 420, window=self.entry, height=60, width=500)
         tk.Button(self, text="CONTINUE", **BUTTON_STYLE, command=self.save_and_next).place(x=350, y=560)
 
+    def reset_page(self):
+        """Resetta la pagina svuotando il campo di input."""
+        self.entry.delete(0, tk.END)
+
     def save_and_next(self):
         script_dir = os.path.dirname(os.path.abspath(__file__))
         user_data_path = os.path.join(script_dir, "user_data.txt")
@@ -295,6 +420,20 @@ class EndPage(PageWithBackground):
     def __init__(self, parent, controller):
         super().__init__(parent, controller)
         self.status_label = self.canvas.create_text(500, 400, text="Looking at your path among the stars", font=TITLE_FONT, fill="white")
+        self.music_ready = False
+        self.music_process = None
+        self.finish_button = None
+
+    def reset_page(self):
+        """Resetta la pagina allo stato iniziale."""
+        self.music_ready = False
+        self.music_process = None
+        # Rimuovi il bottone FINISH se esiste
+        if self.finish_button:
+            self.finish_button.destroy()
+            self.finish_button = None
+        # Resetta il testo dello status
+        self.canvas.itemconfig(self.status_label, text="Looking at your path among the stars")
 
     def generate_future_timeline(self):
         self.controller.fetch_gemini_bio(self.on_complete)
@@ -302,44 +441,138 @@ class EndPage(PageWithBackground):
     def on_complete(self, message):
         # Text generation complete, now wait for aging pipeline
         self.canvas.itemconfig(self.status_label, text=message)
-        #self.canvas.create_text(500, 460, text="Waiting for aging process...", font=("Georgia", 18, "italic"), fill="white", tags="waiting")
 
-        # Start waiting for pipeline in background thread
-        threading.Thread(target=self.wait_for_pipeline, daemon=True).start()
+        # Start pre-loading music in background (analysis only)
+        threading.Thread(target=self.preload_music, daemon=True).start()
+        
+        # Wait for both: pipeline + music analysis
+        threading.Thread(target=self.wait_for_pipeline_and_music, daemon=True).start()
 
-    def wait_for_pipeline(self):
-        """Wait for aging pipeline to complete, then show FINISH button."""
-        # Wait for pipeline (timeout 5 minutes)
+    def preload_music(self):
+        """Pre-load music analysis in background so it's ready when FINISH is pressed."""
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            main_script = os.path.join(script_dir, "main.py")
+            
+            print("🎵 Pre-loading music in background (analysis only)...")
+            result = subprocess.run(
+                ["python", main_script, "--analyze-only"],
+                cwd=script_dir,
+                capture_output=True,
+                text=True,
+                timeout=180  # 3 minute timeout
+            )
+            
+            if result.returncode == 0:
+                print("✅ Music pre-analysis complete (cache ready)")
+                self.music_ready = True
+            else:
+                print(f"⚠️ Music pre-analysis warning: {result.stderr[:200] if result.stderr else 'unknown'}")
+                self.music_ready = True  # allow proceeding anyway
+        except Exception as e:
+            print(f"⚠️ Music pre-analysis error: {e}")
+            self.music_ready = True  # allow proceeding anyway
+
+    def wait_for_pipeline_and_music(self):
+        """Wait for aging pipeline to complete AND music analysis to be ready."""
         pipeline_done = wait_for_pipeline_only(timeout=300, check_interval=1.0)
-
-        # Update UI on main thread
-        if pipeline_done:
-            self.controller.root.after(0, self.show_finish_button)
-        else:
-            self.controller.root.after(0, self.show_timeout_message)
+        if not pipeline_done:
+            # pipeline timeout -> still allow finish, but log
+            print("[Coordinator] Pipeline timed out, allowing Finish.")
+        # Wait until music_ready flag is true
+        while not self.music_ready:
+            time.sleep(0.5)
+        # Show finish on main thread
+        self.controller.root.after(0, self.show_finish_button)
 
     def show_finish_button(self):
         """Show the FINISH button (called when both processes are done)."""
         self.canvas.delete("waiting")
-        #self.canvas.create_text(500, 460, text="All processes complete!", font=("Georgia", 18, "italic"), fill="white")
-        tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal).place(x=350, y=550)
-
-    def show_timeout_message(self):
-        """Show timeout message if pipeline didn't complete."""
-        self.canvas.delete("waiting")
-        #self.canvas.create_text(500, 460, text="Aging process timed out. You can still finish.", font=("Georgia", 16, "italic"), fill="orange")
-        tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal).place(x=350, y=550)
+        self.finish_button = tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal)
+        self.finish_button.place(x=350, y=550)
 
     def finish_and_signal(self):
-        signal_gui_complete()  # Signal coordinator that GUI is done
-        self.controller.root.destroy()
+        # Nascondi il bottone FINISH dopo che è stato premuto
+        if self.finish_button:
+            self.finish_button.destroy()
+            self.finish_button = None
+        
+        # Avvia integrazione musica (selezione + invio sequenziale a SC)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        main_script = os.path.join(script_dir, "main.py")
+        try:
+            self.music_process = subprocess.Popen(
+                ["python", "-u", main_script, "--music-only"],
+                cwd=script_dir,
+                stdout=None,
+                stderr=None,
+                start_new_session=True
+            )
+            print("🎵 Music integration launched (sending playlist to SuperCollider)...")
+        except Exception as e:
+            print(f"⚠️ Could not start music integration: {e}")
+
+        # OSC verso TouchDesigner immediati
+        osc_code = '''
+from pythonosc import udp_client
+client = udp_client.SimpleUDPClient("127.0.0.1", 9000)
+client.send_message("/touchdesigner/start", 0)
+client.send_message("/touchdesigner/start", 1)
+print("[OSC] Sent: /touchdesigner/start (0 and 1)")
+'''
+        subprocess.Popen(
+            ["python", "-c", osc_code],
+            cwd=script_dir,
+            stdout=None,
+            stderr=None,
+            start_new_session=True
+        )
+
+        # Segnala GUI completa ma NON chiude la finestra
+        signal_gui_complete()
+
+        # Mostra messaggio e nascondi elementi, poi programma il reset dopo 2:30 (150 secondi)
+        self.canvas.itemconfig(self.status_label, text="")
+        self.controller.root.after(150_000, self.controller.reset_app)
 
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     user_data_path = os.path.join(script_dir, "user_data.txt")
-    if os.path.exists(user_data_path):
-        os.remove(user_data_path)
-    init_flags()  # Reset coordination flags at start
-    root = tk.Tk()
-    app = LifeOfChuckApp(root)
-    root.mainloop()
+
+def run_music_analysis_only():
+    """Run only music analysis - called with --analyze-music flag."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    main_script = os.path.join(script_dir, "main.py")
+    
+    print("🎵 Starting music analysis...")
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["python", main_script, "--analyze-only"],
+            cwd=script_dir
+        )
+        if result.returncode == 0:
+            print("✅ Music analysis complete")
+        else:
+            print("⚠️ Music analysis failed")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+
+
+if __name__ == "__main__":
+    import sys
+    
+    # Check for music analysis flag
+    if len(sys.argv) > 1 and sys.argv[1] == "--analyze-music":
+        run_music_analysis_only()
+    else:
+        # Normal GUI flow
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        user_data_path = os.path.join(script_dir, "user_data.txt")
+        if os.path.exists(user_data_path):
+            os.remove(user_data_path)
+        init_flags()  # Reset coordination flags at start
+        root = tk.Tk()
+        app = LifeOfChuckApp(root)
+        root.mainloop()
+    

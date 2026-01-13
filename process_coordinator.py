@@ -64,13 +64,19 @@ def both_complete():
 
 
 def _check_and_send_start():
-    """Internal: Check if both done, and send OSC start if so."""
+    """Internal: Check if both done, and send OSC start if so (in background thread)."""
     if both_complete():
-        print("[Coordinator] Both processes complete! Sending OSC start...")
-        _send_osc_start(msg=0)
-        time.sleep(0.5)
-        _send_osc_start(msg=1)
-        _cleanup_flags()
+        # Send OSC in separate thread so it doesn't block audio start
+        def send_osc_delayed():
+            print("[Coordinator] Both processes complete! Sending OSC start immediately...")
+            _send_osc_start(msg=0)
+            _send_osc_start(msg=1)
+            _send_num_stages_to_td()
+            _cleanup_flags()
+
+        import threading
+        osc_thread = threading.Thread(target=send_osc_delayed, daemon=True)
+        osc_thread.start()
 
 
 def _send_osc_start(ip="127.0.0.1", port=9000, msg=None):
@@ -89,6 +95,31 @@ def _send_osc_start(ip="127.0.0.1", port=9000, msg=None):
         return False
     except Exception as e:
         print(f"[Coordinator] Error sending OSC: {e}")
+        return False
+
+
+def _send_num_stages_to_td(ip="127.0.0.1", port=9001):
+    """Send the number of life stages to TouchDesigner on port 9001."""
+    try:
+        from osc_sender import send_num_stages
+        from shared_config import get_num_stages_from_user_data
+
+        # Get number of stages based on user's age
+        num_stages = get_num_stages_from_user_data(
+            user_data_path=PROJECT_ROOT / "user_data.txt",
+            default_stages=5
+        )
+
+        # Send to TouchDesigner
+        send_num_stages(num_stages, ip=ip, port=port)
+
+        return True
+
+    except ImportError as e:
+        print(f"[Coordinator] Warning: Could not import required modules: {e}")
+        return False
+    except Exception as e:
+        print(f"[Coordinator] Error sending num_stages: {e}")
         return False
 
 

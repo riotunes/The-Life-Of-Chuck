@@ -22,15 +22,37 @@ if not os.environ.get("GEMINI_API_KEY"):
 from camera_capture import capture_face
 from face_aging import generate_age_progression
 from camera_to_uv import convert_images_to_uv
-from osc_sender import send_pipeline_complete, send_with_metadata
+from osc_sender import send_pipeline_complete, send_with_metadata, send_num_stages
 from process_coordinator import signal_pipeline_complete
+from shared_config import calculate_num_stages, get_age_increment
+import re
+import time
+import threading
+from pathlib import Path
 
+# Music integration
+MUSIC_SCORE_AVAILABLE = False
+try:
+    sys.path.append(os.path.join(os.path.dirname(__file__), "musica"))
+    from musica.music_score import MusicAnalyzer, MusicPlayer
+    MUSIC_SCORE_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: music_score not available: {e}")
+    MUSIC_SCORE_AVAILABLE = False
+
+# OSC client for SuperCollider
+try:
+    from pythonosc import udp_client
+    OSC_CLIENT_AVAILABLE = True
+except ImportError:
+    OSC_CLIENT_AVAILABLE = False
+    print("⚠️ python-osc non installato. Installa con: pip install python-osc")
 
 # Output directories
 CAPTURES_DIR = "captures"
 AGED_DIR = "aged_outputs"
 UV_DIR = "uv_outputs"
-
+FUTURES_DIR = "futures_texts"
 
 
 def clear_directory(directory):
@@ -39,6 +61,193 @@ def clear_directory(directory):
         shutil.rmtree(directory)
     os.makedirs(directory, exist_ok=True)
     print(f"Cleared: {directory}/")
+
+
+def parse_music_params_from_gemini():
+    """Parse music parameters from Gemini-generated text files in music_params folder."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    music_params_dir = os.path.join(script_dir, "music_params")
+    
+    music_params = []
+    
+    try:
+        if os.path.exists(music_params_dir):
+            # Get all music param files sorted
+            music_files = sorted([f for f in os.listdir(music_params_dir) if f.startswith("music_") and f.endswith(".txt")])
+            
+            for music_file in music_files:
+                filepath = os.path.join(music_params_dir, music_file)
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                
+                # Parse MUSIC: line
+                # Format: MUSIC: arousal,valence,bpm,danceability,aggressive
+                match = re.search(r'MUSIC:\s*([0-9.,\s]+)', content)
+                if match:
+                    values = [float(x.strip()) for x in match.group(1).strip().split(',')]
+                    if len(values) == 5:
+                        params = {
+                            'arousal': values[0],
+                            'valence': values[1],
+                            'bpm': values[2],
+                            'danceability': values[3],
+                            'aggressive': values[4]
+                        }
+                        music_params.append(params)
+        
+        if not music_params:
+            # Fallback to default values if no params found
+            print("⚠️ No music parameters found, using defaults")
+            music_params = [
+                {'arousal': 0.5, 'valence': 0.5, 'bpm': 100, 'danceability': 0.5, 'aggressive': 0.3},
+                {'arousal': 0.6, 'valence': 0.4, 'bpm': 110, 'danceability': 0.6, 'aggressive': 0.4},
+                {'arousal': 0.7, 'valence': 0.3, 'bpm': 120, 'danceability': 0.5, 'aggressive': 0.5},
+                {'arousal': 0.5, 'valence': 0.2, 'bpm': 90, 'danceability': 0.3, 'aggressive': 0.6},
+                {'arousal': 0.3, 'valence': 0.1, 'bpm': 70, 'danceability': 0.2, 'aggressive': 0.7}
+            ]
+    
+    except Exception as e:
+        print(f"Error parsing music params: {e}")
+        # Use default values
+        music_params = [
+            {'arousal': 0.5, 'valence': 0.5, 'bpm': 100, 'danceability': 0.5, 'aggressive': 0.3}
+        ]
+    
+    return music_params
+
+
+def _build_playlist(analyzer, music_params):
+    """
+    Usa MusicPlayer per scegliere i brani più vicini ai parametri.
+    Ritorna una lista di dict con path e filename.
+    """
+    player = MusicPlayer(
+        analyzer=analyzer,
+        osc_ip="0.0.0.0",
+        osc_port=9001,
+        playback_duration=30.0
+    )
+
+    playlist = []
+    for idx, params in enumerate(music_params):
+        closest = player.find_closest_track(
+            arousal=params['arousal'],
+            valence=params['valence'],
+            bpm=params['bpm'],
+            danceability=params['danceability'],
+            aggressive=params['aggressive']
+        )
+        if closest:
+            playlist.append({
+                'path': closest.get('path', ''),
+                'filename': closest.get('filename', ''),
+                'params': params,
+                'scene': idx + 1
+            })
+            print(f"  Scene {idx + 1}: {closest.get('filename', 'Unknown')[:60]}")
+        else:
+            print(f"  Scene {idx + 1}: No track found!")
+    return playlist
+
+
+def _send_playlist_sequenced(playlist, ip="127.0.0.1", port=57120,
+                             segment_dur=30.0, lead=1.0):
+    """
+    Invia i path a SuperCollider in sequenza:
+    - primo subito
+    - poi uno ogni (segment_dur - lead) secondi (default 29s)
+    Processo bloccante: garantisce che tutti i messaggi vengano inviati prima di uscire.
+    """
+    if not OSC_CLIENT_AVAILABLE:
+        print("❌ python-osc non disponibile, impossibile inviare a SuperCollider.")
+        return False
+    if not playlist:
+        print("⚠️ Playlist vuota, niente da inviare.")
+        return False
+
+    client = udp_client.SimpleUDPClient(ip, port)
+
+    try:
+        for idx, item in enumerate(playlist):
+            path = item.get('path', '')
+            if not path:
+                continue
+            client.send_message("/addFile", path)
+            print(f"➡️  [SC] /addFile {path} (scene {idx+1}/{len(playlist)})")
+            if idx < len(playlist) - 1:
+                wait_time = max(1.0, segment_dur - lead)  # es. 29s
+                time.sleep(wait_time)
+        print("✅ Playlist inviata a SuperCollider (sequenziale).")
+        return True
+    except KeyboardInterrupt:
+        print("⏹️ Interrotto dall’utente.")
+        return False
+
+
+def start_music_integration():
+    """
+    Seleziona i brani (in base ai parametri Gemini) e invia la playlist a SuperCollider.
+    Non riproduce audio in Python.
+    """
+    if not MUSIC_SCORE_AVAILABLE:
+        print("\n⚠️ Music analyzer not available, skipping music integration")
+        return
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    audio_folder = os.path.join(script_dir, "musica", "audio")
+    
+    if not os.path.exists(audio_folder):
+        print(f"⚠️ Audio folder not found: {audio_folder}")
+        return
+    
+    # 1) Leggi parametri musicali generati
+    music_params = parse_music_params_from_gemini()
+    
+    # 2) Analizza (o carica cache) prima di scegliere i brani
+    print("\n[MUSIC] Analisi/caching brani...")
+    analyzer = MusicAnalyzer(audio_folder)
+    analyzer.analyze()
+    
+    # 3) Costruisci playlist migliore per i parametri
+    print("[MUSIC] Selezione brani per le scene...")
+    playlist = _build_playlist(analyzer, music_params)
+    if not playlist:
+        print("❌ Nessun brano selezionato, interruzione.")
+        return
+    
+    print("[MUSIC] Invio playlist a SuperCollider (scaglionata)...")
+    _send_playlist_sequenced(
+        playlist,
+        ip="127.0.0.1",
+        port=57120,
+        segment_dur=30.0,
+        lead=1.0
+    )
+    print("🎵 Playlist pronta su SuperCollider (30s a traccia, crossfade gestito in SC).")
+
+
+def pre_analyze_music():
+    """Pre-analyze music files at startup to build cache."""
+    if not MUSIC_SCORE_AVAILABLE:
+        print("\n⚠️ Music analyzer not available")
+        return
+    
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        audio_folder = os.path.join(script_dir, "musica", "audio")
+        
+        if not os.path.exists(audio_folder):
+            print(f"⚠️ Audio folder not found: {audio_folder}")
+            return
+        
+        print("\n[MUSIC] Pre-analyzing audio files...")
+        print("-" * 40)
+        analyzer = MusicAnalyzer(audio_folder)
+        analyzer.analyze()
+        print("✅ Music analysis complete and cached!\n")
+    
+    except Exception as e:
+        print(f"⚠️ Error during pre-analysis: {e}")
 
 
 def run_pipeline():
@@ -78,15 +287,22 @@ def run_pipeline():
     try:
         with open(user_data_path, 'r') as f:
             content = f.read().strip()
-        current_age = int(content.split(':')[1].strip())
-    except ValueError:
-        print("Invalid age. Exiting.")
+        # Extract age from the AGE: line
+        for line in content.split('\n'):
+            if line.startswith('AGE:'):
+                current_age = int(line.split(':')[1].strip())
+                break
+        else:
+            raise ValueError("AGE line not found")
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Invalid age or file not found: {e}")
         sys.exit(1)
     
-    # Configuration
-    age_increment = 10
-    num_stages = 5
-    
+    # Configuration - dynamically calculated based on user's age
+    age_increment = get_age_increment()
+    num_stages = calculate_num_stages(current_age)
+
+    print(f"\n🎯 Age-based generation: {num_stages} stages for age {current_age}")
     print(f"\nGenerating ages: ", end="")
     print(", ".join([str(current_age + (i * age_increment)) for i in range(1, num_stages + 1)]))
     print()
@@ -123,7 +339,6 @@ def run_pipeline():
     print()
     
     # Summary
-    # Summary
     print("=" * 50)
     print("   PIPELINE COMPLETE")
     print("=" * 50)
@@ -141,15 +356,29 @@ def run_pipeline():
     print("[OSC] Notifying TouchDesigner...")
     print("-" * 40)
     
-    # Simple version - just send completion flag
-    # send_pipeline_complete(ip="127.0.0.1", port=9000)
-    
-    # Or with metadata - sends both completion flag and texture count
-    
-
     # Signal to coordinator that pipeline is complete
     signal_pipeline_complete()
+    
+    print("\n" + "=" * 50)
+    print("   PIPELINE COMPLETE - Ready for Music")
+    print("=" * 50)
+    print("\nMusic will start when you press FINISH in the GUI\n")
+
+
+def start_music_integration_cli():
+    """Wrapper per CLI (compatibile con --music-only)."""
+    start_music_integration()
 
 
 if __name__ == "__main__":
-    run_pipeline()
+    # Check command line arguments
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--music-only":
+            start_music_integration_cli()
+        elif sys.argv[1] == "--analyze-only":
+            pre_analyze_music()
+        else:
+            # Any other argument means run pipeline (e.g., image path, age)
+            run_pipeline()
+    else:
+        run_pipeline()

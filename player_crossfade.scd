@@ -7,7 +7,7 @@ s.waitForBoot({
     Buffer.freeAll;
     s.sync;
 
-    ~segmentDur = 30;
+    ~segmentDur = 31;
     ~fadeTime = 5;
     ~queue = List.new;
 

@@ -136,7 +136,7 @@ class LifeOfChuckApp:
                 Età attuale: {current_age}
 
                 OBJECTIVE:
-                Generate exactly {num_stages} raw image prompts for a generative AI WITH MUSIC PARAMETERS.
+                Generate exactly {num_stages} raw image prompts for a stream diffusion generative AI WITH MUSIC PARAMETERS.
                 JUST SENTENCES
 
                 STRUCTURE:
@@ -145,18 +145,20 @@ class LifeOfChuckApp:
                 - Each block MUST have TWO parts: IMAGE PROMPT and MUSIC PARAMETERS
 
                 STRICT FORMAT RULES:
-                1. SENTENCES: Each image prompt must have exactly 7 sentences.
-                2. CONTENT: Only visual nouns and adjectives.
-                3. BANNED: No 'is', 'has', 'the', 'with', 'a', 'of', 'in', 'to'. No verbs.
-                4. PUNCTUATION: Every single word MUST be followed by a comma.
-                5. NO PERIODS: Zero dots. Only commas.
-                6. FOCUS: Lighting, materials, atmosphere, specific objects.
-                7. REALISM: Include decay, shadows, and gritty details.
-                8. MUSIC: After image prompt, add a line with MUSIC: arousal,valence,bpm, acousticness, instrumentalness
+                1. SENTENCES: Each image prompt must have exactly 5 sentences, that are concise and highly descriptive.
+                2. USER: Understand the gender and the cultural background of the user from the language, name and bio.
+                3. LENGTH: EXTREMELY CONCISE. Max 6 words per sentence.
+                4. CONTENT: Emotional scene of the user's life age. Social context, environment, significant objects.
+                5. BANNED: No selfie, no self-portrait.
+                6. PUNCTUATION: Each sentence must end with a comma, except the last one which ends with a period.
+                7. NO PERIODS: Zero dots. Only commas.
+                8. FOCUS: Emotion, social context, dreams, passions, objects, lighting, colors.
+                9. REALISM: Must be realistic and cinematic, NOT abstract or surreal.
+                10. MUSIC: After image prompt, add a line with MUSIC: arousal,valence,bpm, acousticness, instrumentalness
 
                 MUSIC PARAMETERS (all values 0.0-1.0 except BPM which is 60-180):
                 - arousal: energy/activation level (0=calm, 1=intense)
-                - valence: positivity (0=sad/negative, 1=happy/positive)
+                - valence: positivity (0=sad/negative, 1=happy/positive), you can use 0.4-0.6 for neutral
                 - bpm: tempo in beats per minute (60-180)
                 - acousticness: presence of acoustic sounds (0=electronic, 1=acoustic)
                 - instrumentalness: presence of instrumental sounds (0=with vocals, 1=instrumental)

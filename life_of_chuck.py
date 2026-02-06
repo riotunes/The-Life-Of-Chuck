@@ -11,7 +11,9 @@ from google import genai
 from process_coordinator import init_flags, signal_gui_complete, wait_for_pipeline_only
 from shared_config import calculate_num_stages
 
-GEMINI_API_KEY = "AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A"
+GEMINI_API_KEY = "AIzaSyANDLGaf8I-css3kLVj3fr_2TzNkB7OrMA" #RICCARDO API KEY
+#"AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A" #MARIO API KEY
+
 
 APP_WIDTH = 1920
 APP_HEIGHT = 1080
@@ -124,8 +126,16 @@ class LifeOfChuckApp:
                 age_match = re.search(r"AGE: (\d+)", data)
                 current_age = int(age_match.group(1)) if age_match else 30
 
-                # Calculate number of stages dynamically based on age
-                num_stages = calculate_num_stages(current_age)
+                # Check if num_stages already saved (to keep consistency)
+                stages_match = re.search(r"NUM_STAGES: (\d+)", data)
+                if stages_match:
+                    num_stages = int(stages_match.group(1))
+                else:
+                    # Calculate and save num_stages for consistency across all components
+                    num_stages = calculate_num_stages(current_age)
+                    with open(user_data_path, "a", encoding="utf-8") as f_stages:
+                        f_stages.write(f"NUM_STAGES: {num_stages}\n")
+                
                 num_age_blocks = num_stages  # All blocks represent future ages, last one is DEATH
 
                 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -141,7 +151,7 @@ class LifeOfChuckApp:
 
                 STRUCTURE:
                 - Exactly {num_stages} blocks: [AGE X] ({num_age_blocks - 1} random ages) and [DEATH].
-                - start from the current age, never go below it.
+                - start from the current age, never go below it, each step is more or less 10 years older.
                 - Each block MUST have TWO parts: IMAGE PROMPT and MUSIC PARAMETERS
 
                 STRICT FORMAT RULES:
@@ -149,7 +159,7 @@ class LifeOfChuckApp:
                 2. USER: Understand the gender and the cultural background of the user from the language, name and bio.
                 3. LENGTH: EXTREMELY CONCISE. Max 6 words per sentence.
                 4. CONTENT: Emotional scene of the user's life age. Social context, environment, significant objects.
-                5. BANNED: No selfie, no self-portrait.
+                5. BANNED: selfie, self-portrait, user himself, user's name.
                 6. PUNCTUATION: Each sentence must end with a comma, except the last one which ends with a period.
                 7. NO PERIODS: Zero dots. Only commas.
                 8. FOCUS: Emotion, social context, dreams, passions, objects, lighting, colors.
@@ -166,13 +176,13 @@ class LifeOfChuckApp:
                 EXAMPLE OF DESIRED OUTPUT:
                 [AGE 42]
                 Glass walls. A heavy oak desk. The smell of expensive leather and stale coffee. Outside, the city is a grid of cold, indifferent lights.
-                MUSIC: 0.6,0.2,100,0.5,0.3
+                MUSIC: 0.632,0.232,100.2,0.523,0.342
 
                 """
 
                 
                 response = client.models.generate_content(
-                    model="gemini-2.0-flash", 
+                    model="gemini-3-flash-preview", 
                     contents=prompt
                 )
                 
@@ -253,10 +263,10 @@ class LifeOfChuckApp:
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(text)
     
-    def reset_app(self):
+    def clean_old_data(self):
         """
-        Riavvia completamente l'applicazione senza chiudere la GUI.
-        Pulisce tutti i dati, resetta tutte le pagine e torna alla StartPage.
+        Pulisce tutti i dati della sessione precedente.
+        Chiamato quando si preme BEGIN per iniziare una nuova sessione.
         """
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
@@ -287,16 +297,22 @@ class LifeOfChuckApp:
                         os.remove(os.path.join(folder_path, f))
                     except:
                         pass
-        
-        # 4. Resetta tutte le pagine
+    
+    def reset_app(self):
+        """
+        Riavvia completamente l'applicazione senza chiudere la GUI.
+        Resetta tutte le pagine e torna alla StartPage.
+        I dati vengono puliti solo quando si preme BEGIN.
+        """
+        # 1. Resetta tutte le pagine
         for page_name, page in self.pages.items():
             if hasattr(page, 'reset_page'):
                 page.reset_page()
         
-        # 5. Reinizializza i flag di coordinamento
+        # 2. Reinizializza i flag di coordinamento
         init_flags()
         
-        # 6. Torna alla StartPage
+        # 3. Torna alla StartPage
         self.show_page("StartPage")
 
 # --- STYLING (COSI' COME TI PIACE) ---
@@ -312,18 +328,28 @@ class PageWithBackground(tk.Frame):
         self.canvas.pack(fill="both", expand=True)
         self.bg_image_item = self.canvas.create_image(0, 0, anchor="nw")
 
-    def create_outlined_text(self, x, y, text, font, fill="white", outline="black", outline_width=2, **kwargs):
+    def create_outlined_text(self, x, y, text, font, fill="white", outline="black", outline_width=2, tags=None, **kwargs):
+        if tags is None:
+            tags = []
+        elif isinstance(tags, str):
+            tags = [tags]
+        
         # Draw a simple outline by rendering the text slightly offset in four directions
         for dx, dy in ((-outline_width, 0), (outline_width, 0), (0, -outline_width), (0, outline_width)):
-            self.canvas.create_text(x + dx, y + dy, text=text, font=font, fill=outline, anchor="center", **kwargs)
-        return self.canvas.create_text(x, y, text=text, font=font, fill=fill, anchor="center", **kwargs)
+            self.canvas.create_text(x + dx, y + dy, text=text, font=font, fill=outline, anchor="center", tags=tags, **kwargs)
+        return self.canvas.create_text(x, y, text=text, font=font, fill=fill, anchor="center", tags=tags, **kwargs)
 
 class StartPage(PageWithBackground):
     def __init__(self, parent, controller):
         super().__init__(parent, controller)
         self.create_outlined_text(UI_CENTER_X, int(APP_HEIGHT * 0.35), text="The Life of Chuck", font=TITLE_FONT, fill="white")
-        btn = tk.Button(self, text="BEGIN THE JOURNEY", **BUTTON_STYLE, command=lambda: controller.show_page("CameraPage"))
+        btn = tk.Button(self, text="BEGIN THE JOURNEY", **BUTTON_STYLE, command=self.begin_journey)
         self.canvas.create_window(UI_CENTER_X, int(APP_HEIGHT * 0.65), window=btn, anchor="center")
+    
+    def begin_journey(self):
+        """Pulisce i dati vecchi e inizia una nuova sessione."""
+        self.controller.clean_old_data()
+        self.controller.show_page("CameraPage")
 
 class CameraPage(PageWithBackground):
     def __init__(self, parent, controller):
@@ -438,7 +464,8 @@ class BioPage(QuestionBase):
 class EndPage(PageWithBackground):
     def __init__(self, parent, controller):
         super().__init__(parent, controller)
-        self.status_label = self.create_outlined_text(UI_CENTER_X, int(APP_HEIGHT * 0.55), text="Looking at your path among the stars", font=TITLE_FONT, fill="white")
+        self.status_tag = "status_text"
+        self.create_outlined_text(UI_CENTER_X, int(APP_HEIGHT * 0.55), text="The architect is designing your tomorrow", font=TITLE_FONT, fill="white", tags=self.status_tag)
         self.music_ready = False
         self.music_process = None
         self.finish_button = None
@@ -447,19 +474,20 @@ class EndPage(PageWithBackground):
         """Resetta la pagina allo stato iniziale."""
         self.music_ready = False
         self.music_process = None
+        self.completion_message = None
         # Rimuovi il bottone FINISH se esiste
         if self.finish_button:
             self.finish_button.destroy()
             self.finish_button = None
         # Resetta il testo dello status
-        self.canvas.itemconfig(self.status_label, text="Looking at your path among the stars")
+        self.canvas.itemconfig(self.status_tag, text="The architect is designing your tomorrow")
 
     def generate_future_timeline(self):
         self.controller.fetch_gemini_bio(self.on_complete)
 
     def on_complete(self, message):
-        # Text generation complete, now wait for aging pipeline
-        self.canvas.itemconfig(self.status_label, text=message)
+        # Text generation complete, save message to show later when pipeline is done
+        self.completion_message = message
 
         # Start pre-loading music in background (analysis only)
         threading.Thread(target=self.preload_music, daemon=True).start()
@@ -507,6 +535,9 @@ class EndPage(PageWithBackground):
     def show_finish_button(self):
         """Show the FINISH button (called when both processes are done)."""
         self.canvas.delete("waiting")
+        # Show the completion message now that images are ready
+        if hasattr(self, 'completion_message'):
+            self.canvas.itemconfig(self.status_tag, text=self.completion_message)
         self.finish_button = tk.Button(self, text="FINISH", **BUTTON_STYLE, command=self.finish_and_signal)
         self.finish_button.place(x=UI_CENTER_X, y=int(APP_HEIGHT * 0.7), anchor="center")
 
@@ -552,21 +583,27 @@ print("[OSC] Sent: /touchdesigner/start (0 and 1)")
         # Segnala GUI completa ma NON chiude la finestra
         signal_gui_complete()
 
-        # Calcola num_stages dall'età per determinare il tempo di attesa
+        # Leggi num_stages salvato (per consistenza con Gemini e aging)
         import re
         user_data_path = os.path.join(script_dir, "user_data.txt")
         try:
             with open(user_data_path, "r", encoding="utf-8") as f:
                 data = f.read()
-            age_match = re.search(r"AGE: (\d+)", data)
-            current_age = int(age_match.group(1)) if age_match else 30
-            num_stages = calculate_num_stages(current_age)
+            # Prima cerca NUM_STAGES salvato
+            stages_match = re.search(r"NUM_STAGES: (\d+)", data)
+            if stages_match:
+                num_stages = int(stages_match.group(1))
+            else:
+                # Fallback: calcola dall'età
+                age_match = re.search(r"AGE: (\d+)", data)
+                current_age = int(age_match.group(1)) if age_match else 30
+                num_stages = calculate_num_stages(current_age)
         except:
             num_stages = 5  # fallback
 
         # Mostra messaggio e nascondi elementi, poi programma il reset dopo num_stages * 30 secondi
         wait_time_ms = num_stages * 30 * 1000  # millisecondi
-        self.canvas.itemconfig(self.status_label, text="")
+        self.canvas.itemconfig(self.status_tag, text="")
         self.controller.root.after(wait_time_ms, self.controller.reset_app)
 
 if __name__ == "__main__":

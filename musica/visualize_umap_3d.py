@@ -54,16 +54,7 @@ def extract_features(tracks: list, *, include_valence: bool = True, valence_weig
         metadata: dict con info extra per hover
     """
     feature_names = ['arousal', 'valence', 'bpm', 'instrumentalness', 'electronicness']
-    
-    # Estrai BPM per normalizzazione
-    bpms = [t.get('bpm', 100) for t in tracks]
-    bpm_min, bpm_max = min(bpms), max(bpms)
-    
-    def normalize_bpm(bpm):
-        if bpm_max == bpm_min:
-            return 0.5
-        return (bpm - bpm_min) / (bpm_max - bpm_min)
-    
+
     features = []
     track_names = []
     metadata = {
@@ -77,39 +68,35 @@ def extract_features(tracks: list, *, include_valence: bool = True, valence_weig
     if valence_weight < 0:
         raise ValueError('valence_weight must be >= 0')
 
+
     for track in tracks:
         raw_arousal = track.get('arousal', 0.5)
         raw_valence = track.get('valence', 0.5)
-
-        # Backward-compatible fallbacks for older caches:
-        # - instrumentalness: if missing, fall back to clipped danceability
         raw_instrumentalness = track.get('instrumentalness', None)
         if raw_instrumentalness is None:
             raw_instrumentalness = min(1.0, track.get('danceability', 0.0))
-
-        # - electronicness: if missing, fall back to mood_aggressive
         raw_electronicness = track.get('electronicness', None)
         if raw_electronicness is None:
             raw_electronicness = track.get('mood_aggressive', 0.0)
 
+        # Usa direttamente il bpm normalizzato (ora in 'bpm')
+        bpm_norm = track.get('bpm', 0.5)
+
         vec = [
             raw_arousal,
             raw_valence * valence_weight,
-            normalize_bpm(track.get('bpm', 100)),
+            bpm_norm,
             max(0.0, min(1.0, float(raw_instrumentalness))),
             max(0.0, min(1.0, float(raw_electronicness)))
         ]
 
         if not include_valence:
-            # Rimuove la valence SOLO dal vettore usato da UMAP (hover/colore restano disponibili).
             vec.pop(1)
         features.append(vec)
         track_names.append(track.get('filename', 'Unknown'))
-        
-        # Salva valori originali per hover
         metadata['arousal'].append(raw_arousal)
         metadata['valence'].append(raw_valence)
-        metadata['bpm'].append(track.get('bpm', 100))
+        metadata['bpm'].append(bpm_norm)
         metadata['instrumentalness'].append(max(0.0, min(1.0, float(raw_instrumentalness))))
         metadata['electronicness'].append(max(0.0, min(1.0, float(raw_electronicness))))
 

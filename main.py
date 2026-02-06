@@ -67,6 +67,18 @@ def parse_music_params_from_gemini():
     """Parse music parameters from Gemini-generated text files in music_params folder."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     music_params_dir = os.path.join(script_dir, "music_params")
+    user_data_path = os.path.join(script_dir, "user_data.txt")
+    
+    # Read expected num_stages from user_data.txt for consistency
+    expected_stages = None
+    try:
+        with open(user_data_path, 'r') as f:
+            for line in f:
+                if line.startswith('NUM_STAGES:'):
+                    expected_stages = int(line.split(':')[1].strip())
+                    break
+    except:
+        pass
     
     music_params = []
     
@@ -113,6 +125,18 @@ def parse_music_params_from_gemini():
             {'arousal': 0.5, 'valence': 0.5, 'bpm': 100, 'instrumentalness': 0.5, 'electronicness': 0.3}
         ]
     
+    # Ensure music_params matches expected_stages
+    if expected_stages is not None:
+        if len(music_params) > expected_stages:
+            print(f"⚠️ Trimming music params from {len(music_params)} to {expected_stages}")
+            music_params = music_params[:expected_stages]
+        elif len(music_params) < expected_stages:
+            print(f"⚠️ Extending music params from {len(music_params)} to {expected_stages}")
+            # Repeat last params to fill
+            while len(music_params) < expected_stages:
+                music_params.append(music_params[-1] if music_params else 
+                    {'arousal': 0.5, 'valence': 0.5, 'bpm': 100, 'instrumentalness': 0.5, 'electronicness': 0.3})
+    
     return music_params
 
 
@@ -120,6 +144,7 @@ def _build_playlist(analyzer, music_params):
     """
     Usa MusicPlayer per scegliere i brani più vicini ai parametri.
     Ritorna una lista di dict con path e filename.
+    Usa vincolo anti-ripetizione: ogni brano può essere scelto solo una volta.
     """
     player = MusicPlayer(
         analyzer=analyzer,
@@ -129,22 +154,27 @@ def _build_playlist(analyzer, music_params):
     )
 
     playlist = []
+    used_tracks = []  # Lista dei brani già selezionati (anti-ripetizione)
+    
     for idx, params in enumerate(music_params):
         closest = player.find_closest_track(
             arousal=params['arousal'],
             valence=params['valence'],
             bpm=params['bpm'],
             instrumentalness=params['instrumentalness'],
-            electronicness=params['electronicness']
+            electronicness=params['electronicness'],
+            exclude_filenames=used_tracks  # Escludi brani già usati
         )
         if closest:
+            filename = closest.get('filename', '')
+            used_tracks.append(filename)  # Aggiungi ai brani usati
             playlist.append({
                 'path': closest.get('path', ''),
-                'filename': closest.get('filename', ''),
+                'filename': filename,
                 'params': params,
                 'scene': idx + 1
             })
-            print(f"  Scene {idx + 1}: {closest.get('filename', 'Unknown')[:60]}")
+            print(f"  Scene {idx + 1}: {filename[:60]}")
         else:
             print(f"  Scene {idx + 1}: No track found!")
     return playlist
@@ -298,9 +328,21 @@ def run_pipeline():
         print(f"Invalid age or file not found: {e}")
         sys.exit(1)
     
-    # Configuration - dynamically calculated based on user's age
+    # Configuration - read num_stages from user_data.txt if available (for consistency)
     age_increment = get_age_increment()
-    num_stages = calculate_num_stages(current_age)
+    
+    # Check if num_stages already saved by GUI
+    num_stages = None
+    for line in content.split('\n'):
+        if line.startswith('NUM_STAGES:'):
+            num_stages = int(line.split(':')[1].strip())
+            break
+    
+    if num_stages is None:
+        # Calculate and save if not present
+        num_stages = calculate_num_stages(current_age)
+        with open(user_data_path, 'a') as f:
+            f.write(f"NUM_STAGES: {num_stages}\n")
 
     print(f"\n🎯 Age-based generation: {num_stages} stages for age {current_age}")
     print(f"\nGenerating ages: ", end="")

@@ -111,7 +111,7 @@ def plot_bpm_energy(tracks: list, save_path: str = None):
     """Scatter plot BPM vs Energy con mood dominante come colore."""
     fig, ax = plt.subplots(figsize=(12, 8))
     
-    bpm = [t.get('bpm', 0) for t in tracks]
+    bpm = [t.get('bpm', 0) for t in tracks]  # ora normalizzato
     energy = [t.get('energy', 0) for t in tracks]
     names = [shorten_name(t['filename'], 15) for t in tracks]
     
@@ -354,7 +354,7 @@ def plot_3d_valence_arousal_bpm(tracks: list, save_path: str = None):
     
     valence = [t.get('valence', 0.5) for t in tracks]
     arousal = [t.get('arousal', 0.5) for t in tracks]
-    bpm = [t.get('bpm', 0) for t in tracks]
+    bpm = [t.get('bpm', 0) for t in tracks]  # ora normalizzato
     energy = [t.get('energy', 0.5) for t in tracks]
     names = [shorten_name(t['filename'], 15) for t in tracks]
     
@@ -387,7 +387,7 @@ def plot_3d_energy_danceability_bpm(tracks: list, save_path: str = None):
     
     energy = [t.get('energy', 0.5) for t in tracks]
     danceability = [t.get('danceability', 0) for t in tracks]
-    bpm = [t.get('bpm', 0) for t in tracks]
+    bpm = [t.get('bpm', 0) for t in tracks]  # ora normalizzato
     
     # Colore basato su Happy Mood
     happy = [t.get('mood_happy', 0) for t in tracks]
@@ -456,7 +456,7 @@ def plot_5d_multidimensional(tracks: list, save_path: str = None):
     
     valence = [t.get('valence', 0.5) for t in tracks]
     arousal = [t.get('arousal', 0.5) for t in tracks]
-    bpm = [t.get('bpm', 0) for t in tracks]
+    bpm = [t.get('bpm', 0) for t in tracks]  # ora normalizzato
     aggressive = [t.get('mood_aggressive', 0) for t in tracks]
     danceability = [t.get('danceability', 0) for t in tracks]
     names = [shorten_name(t['filename'], 15) for t in tracks]

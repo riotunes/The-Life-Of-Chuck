@@ -101,6 +101,8 @@ def read_user_age(user_data_path="user_data.txt"):
 def get_num_stages_from_user_data(user_data_path="user_data.txt", default_stages=5, rng=None):
     """
     Convenience function to get the number of stages based on user data file.
+    First checks if NUM_STAGES is already saved in the file (for consistency),
+    otherwise calculates based on age.
 
     Args:
         user_data_path (str): Path to user_data.txt file
@@ -109,6 +111,17 @@ def get_num_stages_from_user_data(user_data_path="user_data.txt", default_stages
     Returns:
         int: Number of generation stages
     """
+    # First, check if NUM_STAGES is already saved in the file
+    try:
+        with open(user_data_path, 'r') as f:
+            for line in f:
+                if line.startswith('NUM_STAGES:'):
+                    stages_str = line.split('NUM_STAGES:')[1].strip()
+                    return int(stages_str)
+    except (FileNotFoundError, ValueError):
+        pass
+    
+    # If not found, calculate based on age
     age = read_user_age(user_data_path)
     if age is not None:
         return calculate_num_stages(age, rng=rng)

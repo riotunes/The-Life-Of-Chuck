@@ -532,6 +532,9 @@ class MusicAnalyzer:
         
         # Normalizza valence al range [0, 1]
         tracks = self._normalize_field(tracks, 'valence')
+
+        # Normalizza arousal al range [0, 1]
+        tracks = self._normalize_field(tracks, 'arousal')
         
         # Normalizza instrumentalness al range [0, 1]
         tracks = self._normalize_field(tracks, 'instrumentalness')
@@ -544,6 +547,9 @@ class MusicAnalyzer:
 
         # Normalizza key_strength al range [0, 1]
         tracks = self._normalize_field(tracks, 'key_strength')
+
+        # Normalizza BPM creando campo `bpm_norm` (mantiene `bpm` originale)
+        tracks = self._normalize_bpm_field(tracks)
         
         # Prepara risultati
         self.analysis_results = {
@@ -693,6 +699,37 @@ class MusicAnalyzer:
         
         print(f"  📊 Dance normalizzato: [{min_val:.3f}, {max_val:.3f}] → [0.0, 1.0]")
         return tracks
+
+    def _normalize_bpm_field(self, tracks: List[Dict]) -> List[Dict]:
+        """
+        Normalizza il campo BPM creando un nuovo campo `bpm_norm` nel range [0,1].
+        Mantiene il valore originale in `bpm_original`.
+        """
+        analyzed_indices = []
+        bpm_values = []
+
+        for i, t in enumerate(tracks):
+            if t.get('analyzed', False) and 'bpm' in t and t.get('bpm', 0) > 0:
+                analyzed_indices.append(i)
+                bpm_values.append(float(t['bpm']))
+
+        if len(bpm_values) < 2:
+            return tracks
+
+        bpm_array = np.array(bpm_values, dtype=float)
+        min_val = bpm_array.min()
+        max_val = bpm_array.max()
+
+        if max_val - min_val < 1e-6:
+            return tracks
+
+        normalized = (bpm_array - min_val) / (max_val - min_val)
+
+        for idx, norm_val in zip(analyzed_indices, normalized):
+            tracks[idx]['bpm'] = round(float(norm_val), 3)
+
+        print(f"  📊 BPM normalizzato: [{min_val:.3f}, {max_val:.3f}] → [0.0, 1.0]")
+        return tracks
     
     def _normalize_field(self, tracks: List[Dict], field_name: str) -> List[Dict]:
         """
@@ -745,9 +782,8 @@ class MusicAnalyzer:
         
         bpms = [t['bpm'] for t in analyzed_tracks if t.get('bpm', 0) > 0]
         energies = [t['energy'] for t in analyzed_tracks]
-        
         return {
-            'avg_bpm': round(sum(bpms) / len(bpms), 2) if bpms else 0,
+            'avg_bpm': round(sum(bpms) / len(bpms), 3) if bpms else 0,
             'min_bpm': min(bpms) if bpms else 0,
             'max_bpm': max(bpms) if bpms else 0,
             'avg_energy': round(sum(energies) / len(energies), 3) if energies else 0,
@@ -871,10 +907,17 @@ class MusicPlayer:
             # Fallback: se manca, usa mood_aggressive come proxy (meno ideale)
             electronicness = track.get('mood_aggressive', 0.0)
 
+        # Preferisci `bpm_norm` se presente (generato dall'analizzatore), altrimenti normalizza qui
+        bpm_val = track.get('bpm_norm', None)
+        if bpm_val is None:
+            bpm_feature = self._normalize_bpm(track.get('bpm', 100))
+        else:
+            bpm_feature = max(0.0, min(1.0, float(bpm_val)))
+
         return np.array([
-            track.get('arousal', 0.5),
-            track.get('valence', 0.5),
-            self._normalize_bpm(track.get('bpm', 100)),
+            max(0.0, min(1.0, float(track.get('arousal', 0.5)))),
+            max(0.0, min(1.0, float(track.get('valence', 0.5)))),
+            bpm_feature,
             max(0.0, min(1.0, float(instrumentalness))),
             max(0.0, min(1.0, float(electronicness)))
         ])
@@ -909,13 +952,20 @@ class MusicPlayer:
         return np.sqrt(self._calculate_distance_squared(track, target))
     
     def find_closest_track(self, arousal: float, valence: float, bpm: float,
-                          instrumentalness: float, electronicness: float) -> Optional[Dict]:
+                          instrumentalness: float, electronicness: float,
+                          exclude_filenames: Optional[List[str]] = None) -> Optional[Dict]:
         """
         Trova il brano con distanza minima usando numpy vectorized.
         Usa distanza euclidea al quadrato (senza radice) per efficienza.
+        
+        Args:
+            exclude_filenames: Lista di nomi file da escludere (per evitare ripetizioni)
         """
         if not self.tracks:
             return None
+        
+        # Costruisci set di esclusione per lookup veloce
+        excluded = set(exclude_filenames) if exclude_filenames else set()
         
         # Costruisci vettore target normalizzato
         target_vec = np.array([
@@ -930,6 +980,18 @@ class MusicPlayer:
         if self._feature_matrix is not None:
             diff = self._feature_matrix - target_vec
             distances_sq = np.sum(diff ** 2, axis=1)  # Senza radice
+            
+            # Applica esclusione: imposta distanza infinita per i brani esclusi
+            for i, track in enumerate(self.tracks):
+                if track.get('filename', '') in excluded:
+                    distances_sq[i] = float('inf')
+            
+            # Controlla se tutti i brani sono esclusi
+            if np.all(np.isinf(distances_sq)):
+                print("  ⚠️ Tutti i brani sono esclusi! Rimuovo vincolo anti-ripetizione.")
+                diff = self._feature_matrix - target_vec
+                distances_sq = np.sum(diff ** 2, axis=1)
+            
             closest_idx = np.argmin(distances_sq)
             return self.tracks[closest_idx]
         
@@ -938,12 +1000,21 @@ class MusicPlayer:
         closest = None
         
         for track in self.tracks:
+            # Salta brani esclusi
+            if track.get('filename', '') in excluded:
+                continue
+            
             track_vec = self._track_to_feature_vector(track)
             diff = track_vec - target_vec
             dist_sq = np.dot(diff, diff)
             if dist_sq < min_dist_sq:
                 min_dist_sq = dist_sq
                 closest = track
+        
+        # Se tutti esclusi, cerca senza vincolo
+        if closest is None and excluded:
+            print("  ⚠️ Tutti i brani sono esclusi! Rimuovo vincolo anti-ripetizione.")
+            return self.find_closest_track(arousal, valence, bpm, instrumentalness, electronicness, None)
         
         return closest
     

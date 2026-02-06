@@ -1,0 +1,5 @@
+AGE: 55
+NUM_STAGES: 4
+NAME: Natascia
+DREAM: Viaggiare per il mondo
+BIO: Sono una docente, mi piace l'arte e la creatività

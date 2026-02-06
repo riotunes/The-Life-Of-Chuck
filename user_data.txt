@@ -1,5 +1,5 @@
-AGE: 55
-NUM_STAGES: 4
-NAME: Natascia
-DREAM: Viaggiare per il mondo
-BIO: Sono una docente, mi piace l'arte e la creatività
+AGE: 24
+NUM_STAGES: 7
+NAME: Mario
+DREAM: Being the greatest plumber in the world
+BIO: I love peaches, I hate fire lizards turtles

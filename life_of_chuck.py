@@ -11,8 +11,8 @@ from google import genai
 from process_coordinator import init_flags, signal_gui_complete, wait_for_pipeline_only
 from shared_config import calculate_num_stages
 
-GEMINI_API_KEY = "AIzaSyANDLGaf8I-css3kLVj3fr_2TzNkB7OrMA" #RICCARDO API KEY
-#"AIzaSyAL4NxY6azP6trq8P_RXIApViN_8tvY9_A" #MARIO API KEY
+GEMINI_API_KEY = "AIzaSyAusu4BKjrENlK83lvaPJ5ONrySOaliqo4" #MARIO API KEY
+#"AIzaSyANDLGaf8I-css3kLVj3fr_2TzNkB7OrMA" #RICCARDO API KEY
 
 
 APP_WIDTH = 1920

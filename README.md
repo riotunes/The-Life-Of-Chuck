@@ -1,5 +1,9 @@
 # The Life of Chuck: Multimodal Aging Installation
 
+<p align="center">
+  <img src="LIFE%20OF%20CHUCK.png" width="800">
+</p>
+
 ## Project Overview
 ## What is this?
 **The Life of Chuck** is a deep dive into the blurry line between us and our machines. We usually think of AI as a tool we control, but this project flips that: **If we influence the AI, can the AI influence us back?**

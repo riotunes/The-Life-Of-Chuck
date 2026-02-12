@@ -1,9 +1,20 @@
-# 🎹 The Life of Chuck: Multimodal Aging Installation
+# The Life of Chuck: Multimodal Aging Installation
 
-## 🚀 Project Overview
-**The Life of Chuck** is an interactive multimedia installation that explores the trajectory of a human life through data, vision, and sound. By capturing a user's current age, the system utilizes a probabilistic model to determine a unique "life path," generating a synthetic AI biography alongside a visual aging transformation of the user's own face.
+## Project Overview
+## What is this?
+**The Life of Chuck** is a deep dive into the blurry line between us and our machines. We usually think of AI as a tool we control, but this project flips that: **If we influence the AI, can the AI influence us back?**
 
-## 🏗️ System Architecture
+We’re looking at the interaction between a human and an algorithm to see where that relationship actually leads. Can an AI "see" your journey before it happens? Can it guide a person or indicate where their life is headed?
+
+## The Concept
+The project is built on a few core provocations:
+
+* **The Feedback Loop:** Your data feeds the machine, but the machine’s output feeds your perception of yourself. It's a recursive cycle.
+* **The AI as a Guide:** We explore if an AI can actually map out a life journey, projecting a synthetic future that feels real enough to change the present.
+* **Machine Agency:** We’re testing if the "indicated journey" provided by the AI can actually nudge a human’s path.
+
+  
+## System Architecture
 The installation operates through a coordinated pipeline of three main engines:
 
 1.  **Biometric Intelligence:** Captures user age via `user_data.txt` and calculates a "stage count" (between 2 and 8 stages) using a life-expectancy curve with random perturbations.
@@ -25,7 +36,7 @@ The installation operates through a coordinated pipeline of three main engines:
 * **Audio:** SuperCollider
 * **Protocol:** OSC (Open Sound Control)
 
-## 📦 Installation & Setup
+## Installation & Setup
 
 1.  **Clone and Install:**
     ```bash

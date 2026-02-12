@@ -1,4 +1,4 @@
-# The Life of Chuck: Multimodal Aging Installation
+# The Life of Chuck: Multimodal Installation
 
 <p align="center">
   <img src="LIFE%20OF%20CHUCK.png" width="800">

@@ -1,6 +1,6 @@
-# 🎹 The Life of Chuck: Multimodal Aging Installation
+# The Life of Chuck: Multimodal Aging Installation
 
-## 🚀 Project Overview
+## Project Overview
 ## What is this?
 **The Life of Chuck** is a deep dive into the blurry line between us and our machines. We usually think of AI as a tool we control, but this project flips that: **If we influence the AI, can the AI influence us back?**
 
@@ -14,7 +14,7 @@ The project is built on a few core provocations:
 * **Machine Agency:** We’re testing if the "indicated journey" provided by the AI can actually nudge a human’s path.
 
   
-## 🏗️ System Architecture
+## System Architecture
 The installation operates through a coordinated pipeline of three main engines:
 
 1.  **Biometric Intelligence:** Captures user age via `user_data.txt` and calculates a "stage count" (between 2 and 8 stages) using a life-expectancy curve with random perturbations.
@@ -36,7 +36,7 @@ The installation operates through a coordinated pipeline of three main engines:
 * **Audio:** SuperCollider
 * **Protocol:** OSC (Open Sound Control)
 
-## 📦 Installation & Setup
+## Installation & Setup
 
 1.  **Clone and Install:**
     ```bash

@@ -21,24 +21,27 @@ The project is built on a few core provocations:
 ## System Architecture
 The installation operates through a coordinated pipeline of three main engines:
 
-1.  **Biometric Intelligence:** Captures user age via `user_data.txt` and calculates a "stage count" (between 2 and 8 stages) using a life-expectancy curve with random perturbations.
-2.  **Vision & Aging Pipeline:** Processes facial landmarks to create aged outputs and UV textures for 3D mapping on the `canonical_face_model.obj`.
-3.  **Multimedia Synchronization:** A central coordinator manages file-based flags to sync AI-generated text with SuperCollider audio and TouchDesigner visuals via OSC.
+1.  **Python Backend:** Handles the GUI workflow, AI text generation (**Gemini 2.0 Flash**), progressive face aging (**Gemini 3 Pro Image**), and audio feature analysis.
+2.  **Audio Playback Layer:** A **SuperCollider** engine (`player_crossfade.scd`) that manages real-time audio crossfades and queue management based on emotional track matching.
+3.  **Visualization Layer:** A **TouchDesigner** environment that renders 3D face meshes using generated UV textures, synchronized with AI narratives and audio.
 
 
 
 ## ✨ Key Features
-* **Dynamic Life Modeling:** Uses a Gaussian noise-based model in `shared_config.py` to allow for variability, simulating different life outcomes like "longevity bumps" or "early death".
-* **Process Coordination:** Utilizes `process_coordinator.py` to manage independent threads, ensuring the GUI and the aging pipeline complete before triggering the final show.
-* **Real-time OSC Communication:** Fully networked via `python-osc`, sending triggers to TouchDesigner (Port 9000) and stage data (Port 9001).
-* **Generative Audio:** Integrated SuperCollider scripts (`player.scd`) for real-time soundscapes that react to the aging stages.
+* **Progressive Aging Pipeline:** Uses a "chained generation" strategy where each 10-year aging result becomes the input for the next, preserving identity markers across life stages.
+* **UV Texture Conversion:** Converts 2D AI portraits into 2048x2048 UV maps using **MediaPipe** 468-point landmark detection and affine triangle warping.
+* **Intelligent Music Selection:** Uses **Essentia** and **TensorFlow** to match tracks to life stages by calculating the Euclidean distance between Arousal, Valence, and BPM parameters.
+* **Flag-Based Coordination:** Uses `process_coordinator.py` to synchronize parallel threads (AI text, Image generation, and Music analysis) via file-based flags for non-blocking performance.
 
 ## 🛠️ Tech Stack
-* **Core Logic:** Python 3.12+
-* **AI/Vision:** MediaPipe, OpenCV, Google GenAI
-* **3D/Graphics:** Trimesh, TouchDesigner
-* **Audio:** SuperCollider
-* **Protocol:** OSC (Open Sound Control)
+| Component | Technology |
+| :--- | :--- |
+| **Core Logic** | Python 3.13 |
+| **AI / Vision** | MediaPipe, Google Gemini 3 Pro Image, Gemini 2.0 Flash |
+| **Music Analysis** | Essentia-Tensorflow (RhythmExtractor2013) |
+| **Graphics** | TouchDesigner |
+| **Audio Engine** | SuperCollider |
+| **Protocols** | OSC (Ports 9000, 9001, 57120) |
 
 ## Installation & Setup
 
@@ -47,21 +50,36 @@ The installation operates through a coordinated pipeline of three main engines:
     git clone [https://github.com/riotunes/CPAC-Hackaton.git](https://github.com/riotunes/CPAC-Hackaton.git)
     cd CPAC-Hackaton
     pip install -r requirements.txt
+    pip install essentia-tensorflow
     ```
 
-2.  **Initialize Audio:**
-    Open SuperCollider and boot the server with `player.scd`.
+2.   **Configure the Environment:** 
+    Create a `.env` file in the root directory of the project and add your Gemini API key:
+    ```env
+    GEMINI_API_KEY=your_api_key_here 
+    ```
+## 2. Initialize Audio
 
-3.  **Run the Installation:**
+3. Boot **SuperCollider** and run the file: 
+    ```bash 
+    player_crossfade.scd
+    ```
+
+4. Open and run the file:
     ```bash
-    python main.py
+    python life_of_chuck.py 
     ```
 
-## 📂 Project Structure
-* `shared_config.py`: Probabilistic life-stage logic.
-* `process_coordinator.py`: Syncs the vision pipeline and GUI.
-* `face_aging.py`: Handles the visual transformation logic.
-* `osc_sender.py`: Manages the communication bridge to external software.
-
+## 📂 Project Core Structure
+* `life_of_chuck.py`: Main GUI application (Tkinter)
+* `main.py`: Handles landmark detection and affine warping to UV space.
+* `process_coordinator.py`: Manages the non-blocking flag synchronization between modules
+* `musica/music_score.py`: Analyzes audio library and builds the emotional matching cache.
+* `camera_to_uv.py`: Handles landmark detection and affine warping to UV space.
 ---
-*Created for the CPAC Hackathon.*
+
+##  Conclusion
+
+We hope that this journey through the “multitudes” inhabiting your future will not be merely a technological curiosity, but a moment of genuine introspection. We hope you enjoy the experience and, above all, that you feel something: the weight of time, the joy of fulfilled dreams, or the melancholic beauty of change.
+
+*Created for the CPAC course 2026.*

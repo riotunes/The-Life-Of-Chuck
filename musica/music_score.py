@@ -1,11 +1,10 @@
 """
 Music Analysis Module using Essentia
-Analizza file audio per mood, energia e BPM.
-Salva i risultati in JSON e li ricarica se la cartella non è cambiata.
-Include un server OSC per ricevere parametri e riprodurre il brano più vicino.
+Analyzes audio files for mood, energy, and BPM.
+Saves results in JSON and reloads them if the folder has not changed.
+Includes an OSC server to receive parameters and play the closest matching track.
 """
 
-import os
 import json
 import hashlib
 import threading
@@ -17,54 +16,53 @@ from typing import Dict, List, Optional, Any
 try:
     import essentia
     import essentia.standard as es
-    from essentia.standard import MonoLoader, RhythmExtractor2013, TensorflowPredictEffnetDiscogs, TensorflowPredict2D
+    from essentia.standard import MonoLoader, RhythmExtractor2013
     ESSENTIA_AVAILABLE = True
 except ImportError:
     ESSENTIA_AVAILABLE = False
-    print("⚠️ Essentia non installato. Installa con: pip install essentia-tensorflow")
+    print("⚠️ Essentia not installed. Install with: pip install essentia-tensorflow")
 
 # OSC imports
 try:
     from pythonosc import dispatcher, osc_server
-    from pythonosc.udp_client import SimpleUDPClient
     OSC_AVAILABLE = True
 except ImportError:
     OSC_AVAILABLE = False
-    print("⚠️ python-osc non installato. Installa con: pip install python-osc")
+    print("⚠️ python-osc not installed. Install with: pip install python-osc")
 
 # NumPy import
 import numpy as np
 
 
-def ammorbidisci_distribuzione(dati: np.ndarray, intensita: float = 0.5) -> np.ndarray:
+def smooth_distribution(data: np.ndarray, intensity: float = 0.5) -> np.ndarray:
     """
-    Rende i dati più uniformi preservando parzialmente la forma originale.
+    Makes data more uniform while partially preserving the original shape.
     
     Args:
-        dati: array numpy dei valori.
-        intensita: float tra 0.0 (originale) e 1.0 (uniforme).
+        data: numpy array of values.
+        intensity: float between 0.0 (original) and 1.0 (uniform).
     
     Returns:
-        Array con distribuzione smussata (mantiene l'ordine originale).
+        Array with smoothed distribution (maintains original order).
     """
-    if len(dati) == 0:
-        return dati
+    if len(data) == 0:
+        return data
     
-    # 1. Memorizza l'ordine originale
-    indici_ordinamento = np.argsort(dati)
-    dati_ordinati = dati[indici_ordinamento]
+    # 1. Store original order
+    sort_indices = np.argsort(data)
+    sorted_data = data[sort_indices]
     
-    # 2. Crea il target uniforme (linea retta dal min al max)
-    target_uniforme = np.linspace(dati_ordinati.min(), dati_ordinati.max(), len(dati))
+    # 2. Create uniform target (straight line from min to max)
+    uniform_target = np.linspace(sorted_data.min(), sorted_data.max(), len(data))
     
-    # 3. Fai la media pesata
-    nuovi_dati_ordinati = (1 - intensita) * dati_ordinati + intensita * target_uniforme
+    # 3. Perform weighted average
+    new_sorted_data = (1 - intensity) * sorted_data + intensity * uniform_target
     
-    # 4. Riporta i valori all'ordine originale
-    risultato = np.empty_like(dati)
-    risultato[indici_ordinamento] = nuovi_dati_ordinati
+    # 4. Map values back to original order
+    result = np.empty_like(data)
+    result[sort_indices] = new_sorted_data
     
-    return risultato
+    return result
 
 
 # Audio playback imports
@@ -73,13 +71,12 @@ try:
     AUDIO_PLAYBACK_AVAILABLE = True
 except ImportError:
     AUDIO_PLAYBACK_AVAILABLE = False
-    print("⚠️ sounddevice non installato. Installa con: pip install sounddevice")
-
+    print("⚠️ sounddevice not installed. Install with: pip install sounddevice")
 
 class MusicAnalyzer:
-    """Analizzatore musicale con caching intelligente."""
+    """Music analyzer with intelligent caching."""
     
-    # Estensioni audio supportate
+    # Supported audio extensions
     AUDIO_EXTENSIONS = {'.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aiff', '.aif'}
     
     def __init__(
@@ -89,24 +86,24 @@ class MusicAnalyzer:
         models_folder: Optional[str] = None
     ):
         """
-        Inizializza l'analizzatore.
+        Initializes the analyzer.
         
         Args:
-            audio_folder: Percorso alla cartella con i file audio
-            cache_file: Nome del file JSON per salvare i risultati
-            models_folder: Percorso alla cartella con i modelli Essentia (opzionale)
+            audio_folder: Path to the folder containing audio files
+            cache_file: Name of the JSON file to save results
+            models_folder: Path to the folder with Essentia models (optional)
         """
         self.audio_folder = Path(audio_folder)
         self.cache_file = self.audio_folder / cache_file
         self.models_folder = Path(models_folder) if models_folder else None
         self.analysis_results: Dict[str, Any] = {}
         
-        # Verifica che la cartella esista
+        # Verify that the folder exists
         if not self.audio_folder.exists():
-            raise FileNotFoundError(f"Cartella audio non trovata: {self.audio_folder}")
+            raise FileNotFoundError(f"Audio folder not found: {self.audio_folder}")
     
     def _get_audio_files(self) -> List[Path]:
-        """Ottiene la lista di tutti i file audio nella cartella."""
+        """Gets the list of all audio files in the folder."""
         audio_files = []
         for ext in self.AUDIO_EXTENSIONS:
             audio_files.extend(self.audio_folder.glob(f"*{ext}"))
@@ -115,10 +112,10 @@ class MusicAnalyzer:
     
     def _compute_folder_hash(self) -> str:
         """
-        Calcola un hash della cartella basato su:
-        - Numero di file
-        - Nomi dei file
-        - Dimensioni dei file
+        Computes a hash of the folder based on:
+        - Number of files
+        - File names
+        - File sizes
         """
         audio_files = self._get_audio_files()
         hash_data = []
@@ -132,13 +129,13 @@ class MusicAnalyzer:
     
     def _should_reanalyze(self) -> bool:
         """
-        Controlla se è necessario rianalizzare la cartella.
-        Ritorna True se:
-        - Il file cache non esiste
-        - L'hash della cartella è cambiato (file aggiunti/rimossi/modificati)
+        Checks if it is necessary to re-analyze the folder.
+        Returns True if:
+        - The cache file does not exist
+        - The folder hash has changed (files added/removed/modified)
         """
         if not self.cache_file.exists():
-            print("📁 Cache non trovata, avvio analisi...")
+            print("📁 Cache not found, starting analysis...")
             return True
         
         try:
@@ -149,18 +146,18 @@ class MusicAnalyzer:
             current_hash = self._compute_folder_hash()
             
             if cached_hash != current_hash:
-                print("🔄 Cartella modificata, avvio ri-analisi...")
+                print("🔄 Folder modified, starting re-analysis...")
                 return True
             
-            print("✅ Cache valida, caricamento dati esistenti...")
+            print("✅ Cache valid, loading existing data...")
             return False
             
         except (json.JSONDecodeError, KeyError):
-            print("⚠️ Cache corrotta, avvio ri-analisi...")
+            print("⚠️ Cache corrupted, starting re-analysis...")
             return True
     
     def _analyze_bpm(self, audio: essentia.array) -> Dict[str, Any]:
-        """Analizza il BPM di un file audio."""
+        """Analyzes the BPM of an audio file."""
         try:
             rhythm_extractor = RhythmExtractor2013(method="multifeature")
             bpm, beats, beats_confidence, _, beats_intervals = rhythm_extractor(audio)
@@ -171,13 +168,13 @@ class MusicAnalyzer:
                 'num_beats': len(beats)
             }
         except Exception as e:
-            print(f"  ⚠️ Errore analisi BPM: {e}")
+            print(f"  ⚠️ BPM analysis error: {e}")
             return {'bpm': 0, 'beats_confidence': 0, 'num_beats': 0}
     
     def _analyze_mood_energy(self, audio: essentia.array, sample_rate: int = 44100) -> Dict[str, Any]:
         """
-        Analizza mood ed energia usando gli algoritmi Essentia.
-        Estrae features audio e calcola mood basandosi su caratteristiche spettrali, ritmiche e armoniche.
+        Analyzes mood and energy using Essentia algorithms.
+        Extracts audio features and calculates mood based on spectral, rhythmic, and harmonic characteristics.
         """
         results = {
             'energy': 0.0,
@@ -190,7 +187,7 @@ class MusicAnalyzer:
             'acousticness': 0.0,
             'electronicness': 0.0,
             'valence': 0.5,
-            # Valence components (per debug/plot)
+            # Valence components (for debug/plot)
             'valence_mode': 0.5,
             'valence_brightness': 0.5,
             'valence_dance': 0.0,
@@ -198,12 +195,12 @@ class MusicAnalyzer:
             'valence_pre_penalty': 0.5,
             'arousal': 0.5,
             'key': '',
-            'scale': '',  # 'major' o 'minor'
+            'scale': '',  # 'major' or 'minor'
             'key_strength': 0.0
         }
         
         try:
-            # === ENERGIA ===
+            # === ENERGY ===
             rms = es.RMS()
             frame_size = 2048
             hop_size = 1024
@@ -215,18 +212,17 @@ class MusicAnalyzer:
             
             if energies:
                 avg_energy = sum(energies) / len(energies)
-                max_energy = max(energies)
-                # Normalizza energia (tipicamente RMS è tra 0 e 0.3 per audio normalizzato)
+                # Normalize energy (typically RMS is between 0 and 0.3 for normalized audio)
                 results['energy'] = round(min(1.0, avg_energy * 5), 3)
             
-            # === ANALISI TONALITÀ (FONDAMENTALE PER MOOD) ===
-            # Il modo maggiore/minore è il fattore più importante per happy/sad
-            # Rappresentiamo il modo come valore CONTINUO, lineare, in [0..1]:
-            # - mode_prob_major = 1.0 -> sicuramente major
-            # - mode_prob_major = 0.0 -> sicuramente minor
-            # - mode_prob_major = 0.5 -> neutro / incerto
+            # === KEY ANALYSIS (FUNDAMENTAL FOR MOOD) ===
+            # Major/minor mode is the most important factor for happy/sad
+            # We represent the mode as a CONTINUOUS, linear value in [0..1]:
+            # - mode_prob_major = 1.0 -> definitely major
+            # - mode_prob_major = 0.0 -> definitely minor
+            # - mode_prob_major = 0.5 -> neutral / uncertain
             mode_prob_major = 0.5
-            is_minor = 0.5  # compatibilità: usato sotto come probabilità di minor (0..1)
+            is_minor = 0.5  # compatibility: used below as minor probability (0..1)
             try:
                 key_extractor = es.KeyExtractor()
                 key, scale, key_strength = key_extractor(audio)
@@ -234,13 +230,13 @@ class MusicAnalyzer:
                 results['scale'] = scale
                 results['key_strength'] = round(float(key_strength), 3)
 
-                # Minor mode = triste, Major mode = felice.
-                # Rendiamo l'effetto del modo LINEARE con la confidenza (key_strength):
+                # Minor mode = sad, Major mode = happy.
+                # Make the mode effect LINEAR with confidence (key_strength):
                 # - major: 0.5 + 0.5*strength
                 # - minor: 0.5 - 0.5*strength
                 key_strength01 = max(0.0, min(1.0, float(key_strength)))
-                # Peso "gamma" (power-law) in [0,1] per comprimere valori bassi di confidenza
-                # e rendere l'effetto del modo più neutro finché key_strength non è alto.
+                # "Gamma" weight (power-law) in [0,1] to compress low confidence values
+                # and make the mode effect more neutral until key_strength is high.
                 # w(s) = s^gamma
                 gamma = 2.5
                 strength_weight = float(max(0.0, min(1.0, key_strength01 ** gamma)))
@@ -252,9 +248,9 @@ class MusicAnalyzer:
                     mode_prob_major = 0.5
                 is_minor = 1.0 - mode_prob_major
             except Exception as e:
-                print(f"    ⚠️ KeyExtractor non disponibile: {e}")
+                print(f"    ⚠️ KeyExtractor not available: {e}")
             
-            # === SPECTRAL FLATNESS (piatto = cupo/triste) ===
+            # === SPECTRAL FLATNESS (flat = dark/sad) ===
             try:
                 flatness_extractor = es.Flatness()
                 spectrum_calc = es.Spectrum(size=2048)
@@ -268,11 +264,11 @@ class MusicAnalyzer:
                     flatnesses.append(flatness_extractor(spec))
                 
                 avg_flatness = sum(flatnesses) / len(flatnesses) if flatnesses else 0.5
-                # Flatness alto (vicino a 1) = rumore/cupo, basso = tonale/brillante
+                # High flatness (near 1) = noise/dark, low = tonal/bright
             except:
                 avg_flatness = 0.5
             
-            # === DISSONANZA ===
+            # === DISSONANCE ===
             try:
                 dissonance_calc = es.Dissonance()
                 spectral_peaks = es.SpectralPeaks()
@@ -293,7 +289,7 @@ class MusicAnalyzer:
             except:
                 avg_dissonance = 0.3
             
-            # === FEATURES SPETTRALI ===
+            # === SPECTRAL FEATURES ===
             spectrum = es.Spectrum(size=2048)
             spectral_centroid = es.Centroid(range=sample_rate / 2)
             spectral_rolloff = es.RollOff()
@@ -322,16 +318,15 @@ class MusicAnalyzer:
             avg_flux = sum(fluxes) / len(fluxes) if fluxes else 0
             avg_complexity = sum(complexities) / len(complexities) if complexities else 0
             
-            # Normalizza features (valori tipici)
-            norm_centroid = min(1.0, avg_centroid / 5000)  # Centroide: 0-10000 Hz tipico
-            norm_rolloff = min(1.0, avg_rolloff / 10000)   # Rolloff: 0-20000 Hz
-            norm_flux = min(1.0, avg_flux * 2)             # Flux: 0-0.5 tipico
-            norm_complexity = min(1.0, avg_complexity / 50) # Complexity: 0-100
+            # Normalize features (typical values)
+            norm_centroid = min(1.0, avg_centroid / 5000)   # Centroid: 0-10000 Hz typical
+            norm_flux = min(1.0, avg_flux * 2)              # Flux: 0-0.5 typical
+            norm_complexity = min(1.0, avg_complexity / 50)  # Complexity: 0-100
             
-            # === FEATURES RITMICHE ===
+            # === RHYTHMIC FEATURES ===
             onset_rate = es.OnsetRate()
             onsets, onset_rate_value = onset_rate(audio)
-            norm_onset = min(1.0, onset_rate_value / 4)  # 0-4 onset/sec tipico
+            norm_onset = min(1.0, onset_rate_value / 4)  # 0-4 onset/sec typical
             
             # Danceability
             try:
@@ -349,11 +344,11 @@ class MusicAnalyzer:
             except:
                 norm_dynamics = 0.5
 
-            # === ACOUSTICNESS / ELECTRONICNESS (proxy euristico) ===
-            # Obiettivo: una dimensione continua che vada da "acustico" -> "elettronico".
-            # Usiamo solo feature già calcolate (no modelli esterni):
-            # - flatness alto e flux/complexity alti tendono ad essere più "elettronici/noisy"
-            # - consonanza (bassa dissonanza) e tonality (bassa flatness) tendono ad essere più "acustici"
+            # === ACOUSTICNESS / ELECTRONICNESS (heuristic proxy) ===
+            # Goal: a continuous dimension from "acoustic" -> "electronic".
+            # Use only pre-calculated features (no external models):
+            # - high flatness and high flux/complexity tend to be more "electronic/noisy"
+            # - consonance (low dissonance) and tonality (low flatness) tend to be more "acoustic"
             acousticness = (
                 (1 - avg_flatness) * 0.40 +
                 (1 - avg_dissonance) * 0.20 +
@@ -366,11 +361,11 @@ class MusicAnalyzer:
             results['acousticness'] = round(acousticness, 3)
             results['electronicness'] = round(electronicness, 3)
 
-            # === INSTRUMENTALNESS (proxy euristico) ===
-            # Stima grezza della probabilità di "assenza di voce" basata su:
-            # - stabilità/tonalità (key_strength)
-            # - bassa attività ritmica (onset)
-            # - bassa variazione spettrale (flux) e minore dissonanza
+            # === INSTRUMENTALNESS (heuristic proxy) ===
+            # Rough estimate of "absence of voice" probability based on:
+            # - stability/tonality (key_strength)
+            # - low rhythmic activity (onset)
+            # - low spectral variation (flux) and lower dissonance
             key_strength01 = max(0.0, min(1.0, float(results.get('key_strength', 0.0))))
             instrumentalness = (
                 key_strength01 * 0.35 +
@@ -381,25 +376,25 @@ class MusicAnalyzer:
             instrumentalness = max(0.0, min(1.0, float(instrumentalness)))
             results['instrumentalness'] = round(instrumentalness, 3)
             
-            # === CALCOLO MOOD (MIGLIORATO) ===
-            # Il MODO MUSICALE è il fattore più importante per happy/sad!
-            # - Minor mode → triste (anche con alta energia, es. Skyfall)
-            # - Major mode → felice
-            # - Alta dissonanza → tensione, drammaticità
-            # - Spectral flatness alto → cupo
+            # === MOOD CALCULATION (IMPROVED) ===
+            # MUSICAL MODE is the most important factor for happy/sad!
+            # - Minor mode → sad (even with high energy, e.g., Skyfall)
+            # - Major mode → happy
+            # - High dissonance → tension, drama
+            # - High spectral flatness → dark
             
-            # Arousal (attivazione): energia + brightness + onset rate (peso aumentato)
+            # Arousal (activation): energy + brightness + onset rate (increased weight)
             arousal = (results['energy'] * 0.30 + norm_centroid * 0.25 + norm_onset * 0.45)
             results['arousal'] = round(arousal, 3)
             
-            # Valence (positività): contributo del modo in forma lineare continua.
-            # mode_prob_major è già in [0..1] ed incorpora la confidenza (key_strength).
+            # Valence (positivity): mode contribution in continuous linear form.
+            # mode_prob_major is already in [0..1] and incorporates confidence (key_strength).
             mode_contribution = max(0.0, min(1.0, float(mode_prob_major)))
 
             brightness_contribution = norm_centroid * 0.5 + (1 - avg_flatness) * 0.5
 
-            # Valence: pesi ribalanciati per evitare una separazione troppo binaria.
-            # (prima: modo 50%, brightness 30%, dance 20%)
+            # Valence: rebalanced weights to avoid overly binary separation.
+            # (previous: mode 50%, brightness 30%, dance 20%)
             dance = min(1.0, results['danceability'])
             valence_pre_penalty = (
                 mode_contribution * 0.35 +
@@ -407,11 +402,11 @@ class MusicAnalyzer:
                 dance * 0.25
             )
             
-            # Rimuove la penalità di dissonanza: valence uguale al pre-penalty
+            # Removes dissonance penalty: valence equals pre-penalty
             penalty_factor = 1.0
             valence = valence_pre_penalty
 
-            # Salva componenti (0..1) per visualizzazioni/debug
+            # Save components (0..1) for visualization/debug
             results['valence_mode'] = round(max(0.0, min(1.0, float(mode_contribution))), 3)
             results['valence_brightness'] = round(max(0.0, min(1.0, float(brightness_contribution))), 3)
             results['valence_dance'] = round(max(0.0, min(1.0, float(dance))), 3)
@@ -419,26 +414,26 @@ class MusicAnalyzer:
             results['valence_pre_penalty'] = round(max(0.0, min(1.0, float(valence_pre_penalty))), 3)
             results['valence'] = round(max(0.0, min(1.0, valence)), 3)
             
-            # Mood Happy: alta valence (richiede modo maggiore!)
+            # Mood Happy: high valence (requires major mode!)
             happy = valence * 0.7 + arousal * 0.3
-            # Penalizza se è in minore anche con alta energia
+            # Penalize if it's in minor even with high energy
             if is_minor > 0.5:
                 happy = happy * 0.5
             results['mood_happy'] = round(min(1.0, max(0, happy)), 3)
             
-            # Mood Sad: bassa valence, modo minore
-            # Può essere triste anche con alta energia (ballate drammatiche)
+            # Mood Sad: low valence, minor mode
+            # Can be sad even with high energy (dramatic ballads)
             sad_base = (1 - valence) * 0.5 + is_minor * 0.5
-            # La dissonanza aumenta la drammaticità/tristezza
+            # Dissonance increases drama/sadness
             sad = sad_base + avg_dissonance * 0.2
             results['mood_sad'] = round(min(1.0, max(0, sad)), 3)
             
-            # Mood Aggressive: alto arousal + alto flux + alta dissonanza
+            # Mood Aggressive: high arousal + high flux + high dissonance
             aggressive = (arousal * 0.35 + norm_flux * 0.25 + 
                          norm_complexity * 0.20 + avg_dissonance * 0.20)
             results['mood_aggressive'] = round(min(1.0, aggressive), 3)
             
-            # Mood Relaxed: basso arousal + consonanza + bassa complessità
+            # Mood Relaxed: low arousal + consonance + low complexity
             relaxed = ((1 - arousal) * 0.4 + 
                       (1 - norm_flux) * 0.25 + 
                       (1 - results['energy']) * 0.20 +
@@ -446,28 +441,28 @@ class MusicAnalyzer:
             results['mood_relaxed'] = round(min(1.0, relaxed), 3)
             
         except Exception as e:
-            print(f"  ⚠️ Errore analisi mood/energy: {e}")
+            print(f"  ⚠️ Mood/energy analysis error: {e}")
             import traceback
             traceback.print_exc()
         
         return results
     
     def _analyze_single_file(self, audio_path: Path) -> Dict[str, Any]:
-        """Analizza un singolo file audio."""
-        print(f"  🎵 Analizzando: {audio_path.name}")
+        """Analyzes a single audio file."""
+        print(f"  🎵 Analyzing: {audio_path.name}")
         
         try:
-            # Carica audio (mono, 44100 Hz)
+            # Load audio (mono, 44100 Hz)
             loader_44k = MonoLoader(filename=str(audio_path), sampleRate=44100)
             audio_44k = loader_44k()
             
-            # Durata
+            # Duration
             duration = len(audio_44k) / 44100
             
-            # Analisi BPM
+            # BPM Analysis
             bpm_results = self._analyze_bpm(audio_44k)
             
-            # Analisi Mood/Energy (usa 44100 Hz)
+            # Mood/Energy Analysis (uses 44100 Hz)
             mood_results = self._analyze_mood_energy(audio_44k, sample_rate=44100)
             
             return {
@@ -480,7 +475,7 @@ class MusicAnalyzer:
             }
             
         except Exception as e:
-            print(f"  ❌ Errore: {e}")
+            print(f"  ❌ Error: {e}")
             return {
                 'filename': audio_path.name,
                 'path': str(audio_path),
@@ -490,68 +485,68 @@ class MusicAnalyzer:
     
     def analyze(self) -> Dict[str, Any]:
         """
-        Esegue l'analisi della cartella.
-        Se la cartella non è cambiata, carica i risultati dalla cache.
+        Performs the analysis of the folder.
+        If the folder hasn't changed, loads results from cache.
         """
         if not ESSENTIA_AVAILABLE:
-            raise ImportError("Essentia non è disponibile. Installalo con: pip install essentia-tensorflow")
+            raise ImportError("Essentia is not available. Install with: pip install essentia-tensorflow")
         
-        # Check se dobbiamo rianalizzare
+        # Check if we need to re-analyze
         if not self._should_reanalyze():
             return self.load_from_cache()
         
-        # Esegui analisi
+        # Perform analysis
         audio_files = self._get_audio_files()
         
         if not audio_files:
-            print("⚠️ Nessun file audio trovato nella cartella!")
+            print("⚠️ No audio files found in the folder!")
             return {'tracks': [], 'folder_hash': '', 'total_tracks': 0}
         
-        print(f"\n🎼 Avvio analisi di {len(audio_files)} file audio...\n")
+        print(f"\n🎼 Starting analysis of {len(audio_files)} audio files...\n")
         
         tracks = []
         for audio_file in audio_files:
             track_data = self._analyze_single_file(audio_file)
             tracks.append(track_data)
         
-        # Applica smoothing (bending) alla distribuzione di valence_mode
-        # per ottenere un grafico più smussato
-        tracks = self._apply_mode_smoothing(tracks, intensita=1.0)
+        # Apply smoothing (bending) to the valence_mode distribution
+        # to get a smoother graph
+        tracks = self._apply_mode_smoothing(tracks, intensity=1.0)
         
-        # Normalizza brightness al range [0, 1] basandosi su min/max globale
+        # Normalize brightness to range [0, 1] based on global min/max
         tracks = self._normalize_brightness(tracks)
         
-        # Normalizza dance al range [0, 1] basandosi su min/max globale
+        # Normalize dance to range [0, 1] based on global min/max
         tracks = self._normalize_dance(tracks)
         
-        # Normalizza energy al range [0, 1] basandosi su min/max globale
+        # Normalize energy to range [0, 1] based on global min/max
         tracks = self._normalize_field(tracks, 'energy')
 
-        # Normalizza valence_pre_penalty al range [0, 1]
+        # Normalize valence_pre_penalty to range [0, 1]
         tracks = self._normalize_field(tracks, 'valence_pre_penalty')
         
-        # Normalizza valence al range [0, 1]
+        # Normalize valence to range [0, 1]
         tracks = self._normalize_field(tracks, 'valence')
 
-        # Normalizza arousal al range [0, 1]
+        # Normalize arousal to range [0, 1]
         tracks = self._normalize_field(tracks, 'arousal')
         
-        # Normalizza instrumentalness al range [0, 1]
+        # Normalize instrumentalness to range [0, 1]
         tracks = self._normalize_field(tracks, 'instrumentalness')
         
-        # Normalizza acousticness al range [0, 1]
+        # Normalize acousticness to range [0, 1]
         tracks = self._normalize_field(tracks, 'acousticness')
         
-        # Normalizza electronicness al range [0, 1]
+        # Normalize electronicness to range [0, 1]
         tracks = self._normalize_field(tracks, 'electronicness')
 
-        # Normalizza key_strength al range [0, 1]
+        # Normalize key_strength to range [0, 1]
         tracks = self._normalize_field(tracks, 'key_strength')
 
-        # Normalizza BPM creando campo `bpm_norm` (mantiene `bpm` originale)
+        # Normalize BPM creating `bpm_norm` field (keeps original `bpm`)
         tracks = self._normalize_bpm_field(tracks)
         
-        # Prepara risultati
+        # Prepare results
         self.analysis_results = {
             'folder_hash': self._compute_folder_hash(),
             'folder_path': str(self.audio_folder),
@@ -560,25 +555,25 @@ class MusicAnalyzer:
             'summary': self._compute_summary(tracks)
         }
         
-        # Salva cache
+        # Save cache
         self._save_cache()
         
-        print(f"\n✅ Analisi completata! {len(tracks)} brani analizzati.")
+        print(f"\n✅ Analysis complete! {len(tracks)} tracks analyzed.")
         return self.analysis_results
     
-    def _apply_mode_smoothing(self, tracks: List[Dict], intensita: float = 0.5) -> List[Dict]:
+    def _apply_mode_smoothing(self, tracks: List[Dict], intensity: float = 0.5) -> List[Dict]:
         """
-        Applica smoothing (bending) alla distribuzione di valence_mode.
-        Rende la distribuzione più uniforme per un grafico più smussato.
+        Applies smoothing (bending) to the valence_mode distribution.
+        Makes the distribution more uniform for a smoother graph.
         
         Args:
-            tracks: Lista di dizionari con i dati dei brani
-            intensita: float tra 0.0 (originale) e 1.0 (uniforme)
+            tracks: List of dictionaries with track data
+            intensity: float between 0.0 (original) and 1.0 (uniform)
         
         Returns:
-            Lista di tracks con valence_mode smussato
+            List of tracks with smoothed valence_mode
         """
-        # Filtra solo i brani analizzati con valence_mode valido
+        # Filter only analyzed tracks with valid valence_mode
         analyzed_indices = []
         mode_values = []
         
@@ -588,19 +583,19 @@ class MusicAnalyzer:
                 mode_values.append(t['valence_mode'])
         
         if len(mode_values) < 2:
-            return tracks  # Non abbastanza dati per lo smoothing
+            return tracks  # Not enough data for smoothing
         
-        # Applica la funzione di smoothing
+        # Apply smoothing function
         mode_array = np.array(mode_values, dtype=float)
-        smoothed_values = ammorbidisci_distribuzione(mode_array, intensita)
+        smoothed_values = smooth_distribution(mode_array, intensity)
         
-        # Aggiorna i valori nei tracks e ricalcola valence_pre_penalty e valence
+        # Update values in tracks and recalculate valence_pre_penalty and valence
         for idx, smoothed_val in zip(analyzed_indices, smoothed_values):
             t = tracks[idx]
             t['valence_mode_original'] = t['valence_mode']
             t['valence_mode'] = round(float(smoothed_val), 3)
             
-            # Ricalcola valence_pre_penalty con il nuovo valence_mode smoothato
+            # Recalculate valence_pre_penalty with new smoothed valence_mode
             if 'valence_brightness' in t and 'valence_dance' in t:
                 new_pre_penalty = (
                     t['valence_mode'] * 0.35 +
@@ -610,26 +605,26 @@ class MusicAnalyzer:
                 t['valence_pre_penalty_original'] = t.get('valence_pre_penalty', new_pre_penalty)
                 t['valence_pre_penalty'] = round(max(0.0, min(1.0, new_pre_penalty)), 3)
                 
-                # Ricalcola valence (dato che penalty_factor = 1.0, è uguale a pre_penalty)
+                # Recalculate valence (since penalty_factor = 1.0, it equals pre_penalty)
                 t['valence_original'] = t.get('valence', new_pre_penalty)
                 t['valence'] = t['valence_pre_penalty']
         
-        print(f"  🔄 Smoothing applicato a valence_mode (intensità: {intensita})")
-        print(f"  🔄 Ricalcolati valence_pre_penalty e valence per {len(analyzed_indices)} brani")
+        print(f"  🔄 Smoothing applied to valence_mode (intensity: {intensity})")
+        print(f"  🔄 Recalculated valence_pre_penalty and valence for {len(analyzed_indices)} tracks")
         return tracks
     
     def _normalize_brightness(self, tracks: List[Dict]) -> List[Dict]:
         """
-        Normalizza valence_brightness al range [0, 1] usando min-max scaling.
-        Questo espande la distribuzione per usare tutto il range disponibile.
+        Normalizes valence_brightness to range [0, 1] using min-max scaling.
+        Expands the distribution to use the full available range.
         
         Args:
-            tracks: Lista di dizionari con i dati dei brani
+            tracks: List of dictionaries with track data
         
         Returns:
-            Lista di tracks con valence_brightness normalizzato
+            List of tracks with normalized valence_brightness
         """
-        # Raccoglie i valori di brightness dai brani analizzati
+        # Collect brightness values from analyzed tracks
         analyzed_indices = []
         brightness_values = []
         
@@ -639,38 +634,38 @@ class MusicAnalyzer:
                 brightness_values.append(t['valence_brightness'])
         
         if len(brightness_values) < 2:
-            return tracks  # Non abbastanza dati
+            return tracks  # Not enough data
         
         brightness_array = np.array(brightness_values, dtype=float)
         min_val = brightness_array.min()
         max_val = brightness_array.max()
         
         if max_val - min_val < 1e-6:
-            return tracks  # Range troppo piccolo
+            return tracks  # Range too small
         
-        # Normalizza al range [0, 1]
+        # Normalize to range [0, 1]
         normalized = (brightness_array - min_val) / (max_val - min_val)
         
-        # Aggiorna i valori nei tracks
+        # Update values in tracks
         for idx, norm_val in zip(analyzed_indices, normalized):
             tracks[idx]['valence_brightness_original'] = tracks[idx]['valence_brightness']
             tracks[idx]['valence_brightness'] = round(float(norm_val), 3)
         
-        print(f"  📊 Brightness normalizzato: [{min_val:.3f}, {max_val:.3f}] → [0.0, 1.0]")
+        print(f"  📊 Normalized Brightness: [{min_val:.3f}, {max_val:.3f}] → [0.0, 1.0]")
         return tracks
     
     def _normalize_dance(self, tracks: List[Dict]) -> List[Dict]:
         """
-        Normalizza valence_dance al range [0, 1] usando min-max scaling.
-        Questo espande la distribuzione per usare tutto il range disponibile.
+        Normalizes valence_dance to range [0, 1] using min-max scaling.
+        Expands the distribution to use the full available range.
         
         Args:
-            tracks: Lista di dizionari con i dati dei brani
+            tracks: List of dictionaries with track data
         
         Returns:
-            Lista di tracks con valence_dance normalizzato
+            List of tracks with normalized valence_dance
         """
-        # Raccoglie i valori di dance dai brani analizzati
+        # Collect dance values from analyzed tracks
         analyzed_indices = []
         dance_values = []
         
@@ -680,30 +675,30 @@ class MusicAnalyzer:
                 dance_values.append(t['valence_dance'])
         
         if len(dance_values) < 2:
-            return tracks  # Non abbastanza dati
+            return tracks  # Not enough data
         
         dance_array = np.array(dance_values, dtype=float)
         min_val = dance_array.min()
         max_val = dance_array.max()
         
         if max_val - min_val < 1e-6:
-            return tracks  # Range troppo piccolo
+            return tracks  # Range too small
         
-        # Normalizza al range [0, 1]
+        # Normalize to range [0, 1]
         normalized = (dance_array - min_val) / (max_val - min_val)
         
-        # Aggiorna i valori nei tracks
+        # Update values in tracks
         for idx, norm_val in zip(analyzed_indices, normalized):
             tracks[idx]['valence_dance_original'] = tracks[idx]['valence_dance']
             tracks[idx]['valence_dance'] = round(float(norm_val), 3)
         
-        print(f"  📊 Dance normalizzato: [{min_val:.3f}, {max_val:.3f}] → [0.0, 1.0]")
+        print(f"  📊 Normalized Dance: [{min_val:.3f}, {max_val:.3f}] → [0.0, 1.0]")
         return tracks
 
     def _normalize_bpm_field(self, tracks: List[Dict]) -> List[Dict]:
         """
-        Normalizza il campo BPM creando un nuovo campo `bpm_norm` nel range [0,1].
-        Mantiene il valore originale in `bpm_original`.
+        Normalizes the BPM field creating a new `bpm_norm` field in the range [0,1].
+        Keeps original value in `bpm_original`.
         """
         analyzed_indices = []
         bpm_values = []
@@ -728,21 +723,21 @@ class MusicAnalyzer:
         for idx, norm_val in zip(analyzed_indices, normalized):
             tracks[idx]['bpm'] = round(float(norm_val), 3)
 
-        print(f"  📊 BPM normalizzato: [{min_val:.3f}, {max_val:.3f}] → [0.0, 1.0]")
+        print(f"  📊 Normalized BPM: [{min_val:.3f}, {max_val:.3f}] → [0.0, 1.0]")
         return tracks
     
     def _normalize_field(self, tracks: List[Dict], field_name: str) -> List[Dict]:
         """
-        Normalizza un campo generico al range [0, 1] usando min-max scaling.
+        Normalizes a generic field to range [0, 1] using min-max scaling.
         
         Args:
-            tracks: Lista di dizionari con i dati dei brani
-            field_name: Nome del campo da normalizzare
+            tracks: List of dictionaries with track data
+            field_name: Name of the field to normalize
         
         Returns:
-            Lista di tracks con il campo normalizzato
+            List of tracks with normalized field
         """
-        # Raccoglie i valori dal campo specificato
+        # Collect values from specified field
         analyzed_indices = []
         field_values = []
         
@@ -752,29 +747,29 @@ class MusicAnalyzer:
                 field_values.append(t[field_name])
         
         if len(field_values) < 2:
-            return tracks  # Non abbastanza dati
+            return tracks  # Not enough data
         
         field_array = np.array(field_values, dtype=float)
         min_val = field_array.min()
         max_val = field_array.max()
         
         if max_val - min_val < 1e-6:
-            print(f"  ⚠️ {field_name}: range troppo piccolo, skip normalizzazione")
-            return tracks  # Range troppo piccolo
+            print(f"  ⚠️ {field_name}: range too small, skipping normalization")
+            return tracks  # Range too small
         
-        # Normalizza al range [0, 1]
+        # Normalize to range [0, 1]
         normalized = (field_array - min_val) / (max_val - min_val)
         
-        # Aggiorna i valori nei tracks
+        # Update values in tracks
         for idx, norm_val in zip(analyzed_indices, normalized):
             tracks[idx][f'{field_name}_original'] = tracks[idx][field_name]
             tracks[idx][field_name] = round(float(norm_val), 3)
         
-        print(f"  📊 {field_name} normalizzato: [{min_val:.3f}, {max_val:.3f}] → [0.0, 1.0]")
+        print(f"  📊 Normalized {field_name}: [{min_val:.3f}, {max_val:.3f}] → [0.0, 1.0]")
         return tracks
     
     def _compute_summary(self, tracks: List[Dict]) -> Dict[str, Any]:
-        """Calcola statistiche riassuntive."""
+        """Calculates summary statistics."""
         analyzed_tracks = [t for t in tracks if t.get('analyzed', False)]
         
         if not analyzed_tracks:
@@ -791,20 +786,20 @@ class MusicAnalyzer:
         }
     
     def _save_cache(self):
-        """Salva i risultati nel file JSON."""
+        """Saves results to JSON file."""
         with open(self.cache_file, 'w', encoding='utf-8') as f:
             json.dump(self.analysis_results, f, indent=2, ensure_ascii=False)
-        print(f"💾 Cache salvata in: {self.cache_file}")
+        print(f"💾 Cache saved to: {self.cache_file}")
     
     def load_from_cache(self) -> Dict[str, Any]:
-        """Carica i risultati dalla cache."""
+        """Loads results from cache."""
         with open(self.cache_file, 'r', encoding='utf-8') as f:
             self.analysis_results = json.load(f)
-        print(f"📂 Caricati {self.analysis_results.get('total_tracks', 0)} brani dalla cache.")
+        print(f"📂 Loaded {self.analysis_results.get('total_tracks', 0)} tracks from cache.")
         return self.analysis_results
     
     def get_tracks_by_bpm_range(self, min_bpm: float, max_bpm: float) -> List[Dict]:
-        """Filtra brani per range BPM."""
+        """Filter tracks by BPM range."""
         if not self.analysis_results:
             self.analyze()
         
@@ -814,7 +809,7 @@ class MusicAnalyzer:
         ]
     
     def get_tracks_by_energy(self, min_energy: float = 0.0, max_energy: float = 1.0) -> List[Dict]:
-        """Filtra brani per livello di energia."""
+        """Filter tracks by energy level."""
         if not self.analysis_results:
             self.analyze()
         
@@ -824,7 +819,7 @@ class MusicAnalyzer:
         ]
     
     def get_sorted_by(self, key: str, reverse: bool = False) -> List[Dict]:
-        """Ordina i brani per una chiave specifica."""
+        """Sort tracks by a specific key."""
         if not self.analysis_results:
             self.analyze()
         
@@ -834,13 +829,13 @@ class MusicAnalyzer:
 
 class MusicPlayer:
     """
-    Server OSC che riceve parametri musicali e riproduce il brano più vicino.
+    OSC Server that receives musical parameters and plays the closest matching track.
     
-    Riceve via OSC:
+    Receives via OSC:
     - arousal, valence, bpm, instrumentalness, electronicness
     
-    Calcola la distanza euclidea normalizzata e riproduce il brano più vicino
-    per 30 secondi a partire dal primo onset.
+    Calculates normalized Euclidean distance and plays the closest track
+    for 30 seconds starting from the first onset.
     """
     
     def __init__(
@@ -851,63 +846,63 @@ class MusicPlayer:
         playback_duration: float = 30.0
     ):
         """
-        Inizializza il player.
+        Initializes the player.
         
         Args:
-            analyzer: Istanza di MusicAnalyzer con dati già analizzati
-            osc_ip: Indirizzo IP per il server OSC
-            osc_port: Porta per il server OSC
-            playback_duration: Durata della riproduzione in secondi
+            analyzer: MusicAnalyzer instance with pre-analyzed data
+            osc_ip: IP address for the OSC server
+            osc_port: Port for the OSC server
+            playback_duration: Playback duration in seconds
         """
         self.analyzer = analyzer
         self.osc_ip = osc_ip
         self.osc_port = osc_port
         self.playback_duration = playback_duration
         
-        # Assicurati che i dati siano caricati
+        # Ensure data is loaded
         if not self.analyzer.analysis_results:
             self.analyzer.analyze()
         
         self.tracks = [t for t in self.analyzer.analysis_results.get('tracks', []) 
                       if t.get('analyzed', False)]
         
-        # Stato playback
+        # Playback status
         self.is_playing = False
         self.current_stream = None
         self.stop_event = threading.Event()
         
-        # Normalizzazione BPM (per calcolo distanza)
+        # BPM Normalization (for distance calculation)
         bpms = [t.get('bpm', 100) for t in self.tracks]
         self.bpm_min = min(bpms) if bpms else 60
         self.bpm_max = max(bpms) if bpms else 180
         
-        # Pre-calcola matrice features per ricerca veloce
+        # Pre-calculate feature matrix for fast searching
         self._feature_matrix = None
         self._build_feature_matrix()
         
-        # Server OSC
+        # OSC Server
         self.server = None
         self.server_thread = None
         
     def _normalize_bpm(self, bpm: float) -> float:
-        """Normalizza BPM tra 0 e 1."""
+        """Normalizes BPM between 0 and 1."""
         if self.bpm_max == self.bpm_min:
             return 0.5
         return (bpm - self.bpm_min) / (self.bpm_max - self.bpm_min)
     
     def _track_to_feature_vector(self, track: Dict) -> np.ndarray:
-        """Converte una traccia in un vettore di features normalizzato."""
+        """Converts a track into a normalized feature vector."""
         instrumentalness = track.get('instrumentalness', None)
         if instrumentalness is None:
-            # Fallback: se manca, usa danceability come proxy (meno ideale ma evita rotture)
+            # Fallback: if missing, use danceability as proxy
             instrumentalness = min(1.0, track.get('danceability', 0.0))
 
         electronicness = track.get('electronicness', None)
         if electronicness is None:
-            # Fallback: se manca, usa mood_aggressive come proxy (meno ideale)
+            # Fallback: if missing, use mood_aggressive as proxy
             electronicness = track.get('mood_aggressive', 0.0)
 
-        # Preferisci `bpm_norm` se presente (generato dall'analizzatore), altrimenti normalizza qui
+        # Prefer `bpm_norm` if present (generated by analyzer), otherwise normalize here
         bpm_val = track.get('bpm_norm', None)
         if bpm_val is None:
             bpm_feature = self._normalize_bpm(track.get('bpm', 100))
@@ -923,7 +918,7 @@ class MusicPlayer:
         ])
     
     def _build_feature_matrix(self):
-        """Pre-calcola la matrice di features per tutte le tracce."""
+        """Pre-calculates the feature matrix for all tracks."""
         if not self.tracks:
             self._feature_matrix = None
             return
@@ -932,8 +927,8 @@ class MusicPlayer:
     
     def _calculate_distance_squared(self, track: Dict, target: Dict) -> float:
         """
-        Calcola la distanza euclidea AL QUADRATO (senza radice) tra un brano e i parametri target.
-        Sufficiente per confronti di distanza minima.
+        Calculates the SQUARED Euclidean distance between a track and target parameters.
+        Sufficient for minimum distance comparisons.
         """
         track_vec = self._track_to_feature_vector(track)
         target_vec = np.array([
@@ -945,29 +940,29 @@ class MusicPlayer:
         ])
         
         diff = track_vec - target_vec
-        return np.dot(diff, diff)  # Distanza al quadrato, senza radice
+        return np.dot(diff, diff)  # Squared distance, no root
     
     def _calculate_distance(self, track: Dict, target: Dict) -> float:
-        """Wrapper per compatibilità: restituisce distanza (con radice)."""
+        """Wrapper for compatibility: returns distance (with root)."""
         return np.sqrt(self._calculate_distance_squared(track, target))
     
     def find_closest_track(self, arousal: float, valence: float, bpm: float,
                           instrumentalness: float, electronicness: float,
                           exclude_filenames: Optional[List[str]] = None) -> Optional[Dict]:
         """
-        Trova il brano con distanza minima usando numpy vectorized.
-        Usa distanza euclidea al quadrato (senza radice) per efficienza.
+        Finds track with minimum distance using vectorized numpy.
+        Uses squared Euclidean distance for efficiency.
         
         Args:
-            exclude_filenames: Lista di nomi file da escludere (per evitare ripetizioni)
+            exclude_filenames: List of filenames to exclude (to avoid repetition)
         """
         if not self.tracks:
             return None
         
-        # Costruisci set di esclusione per lookup veloce
+        # Build exclusion set for fast lookup
         excluded = set(exclude_filenames) if exclude_filenames else set()
         
-        # Costruisci vettore target normalizzato
+        # Build normalized target vector
         target_vec = np.array([
             arousal,
             valence,
@@ -976,31 +971,31 @@ class MusicPlayer:
             electronicness
         ])
         
-        # Calcolo vectorized: distanza al quadrato per tutte le tracce
+        # Vectorized calculation: squared distance for all tracks
         if self._feature_matrix is not None:
             diff = self._feature_matrix - target_vec
-            distances_sq = np.sum(diff ** 2, axis=1)  # Senza radice
+            distances_sq = np.sum(diff ** 2, axis=1)  # No root
             
-            # Applica esclusione: imposta distanza infinita per i brani esclusi
+            # Apply exclusion: set infinite distance for excluded tracks
             for i, track in enumerate(self.tracks):
                 if track.get('filename', '') in excluded:
                     distances_sq[i] = float('inf')
             
-            # Controlla se tutti i brani sono esclusi
+            # Check if all tracks are excluded
             if np.all(np.isinf(distances_sq)):
-                print("  ⚠️ Tutti i brani sono esclusi! Rimuovo vincolo anti-ripetizione.")
+                print("  ⚠️ All tracks excluded! Removing anti-repetition constraint.")
                 diff = self._feature_matrix - target_vec
                 distances_sq = np.sum(diff ** 2, axis=1)
             
             closest_idx = np.argmin(distances_sq)
             return self.tracks[closest_idx]
         
-        # Fallback se matrice non disponibile
+        # Fallback if matrix unavailable
         min_dist_sq = float('inf')
         closest = None
         
         for track in self.tracks:
-            # Salta brani esclusi
+            # Skip excluded tracks
             if track.get('filename', '') in excluded:
                 continue
             
@@ -1011,15 +1006,15 @@ class MusicPlayer:
                 min_dist_sq = dist_sq
                 closest = track
         
-        # Se tutti esclusi, cerca senza vincolo
+        # If all excluded, search without constraint
         if closest is None and excluded:
-            print("  ⚠️ Tutti i brani sono esclusi! Rimuovo vincolo anti-ripetizione.")
+            print("  ⚠️ All tracks excluded! Removing anti-repetition constraint.")
             return self.find_closest_track(arousal, valence, bpm, instrumentalness, electronicness, None)
         
         return closest
     
     def _find_first_onset(self, audio_path: str) -> float:
-        """Trova il tempo del primo onset nel file audio."""
+        """Finds the timestamp of the first onset in the audio file."""
         try:
             loader = MonoLoader(filename=audio_path, sampleRate=44100)
             audio = loader()
@@ -1031,17 +1026,17 @@ class MusicPlayer:
                 return float(onsets[0])
             return 0.0
         except Exception as e:
-            print(f"  ⚠️ Errore nel trovare onset: {e}")
+            print(f"  ⚠️ Error finding onset: {e}")
             return 0.0
     
     def _play_audio(self, audio_path: str, start_time: float, duration: float):
-        """Riproduce l'audio dal tempo specificato per la durata indicata."""
+        """Plays audio from specified time for indicated duration."""
         if not AUDIO_PLAYBACK_AVAILABLE:
-            print("❌ Playback non disponibile. Installa sounddevice.")
+            print("❌ Playback unavailable. Install sounddevice.")
             return
         
         try:
-            # Carica audio
+            # Load audio
             loader = MonoLoader(filename=audio_path, sampleRate=44100)
             audio = loader()
             
@@ -1049,7 +1044,7 @@ class MusicPlayer:
             start_sample = int(start_time * sample_rate)
             end_sample = start_sample + int(duration * sample_rate)
             
-            # Assicurati di non superare la lunghezza dell'audio
+            # Ensure we don't exceed audio length
             end_sample = min(end_sample, len(audio))
             
             if start_sample >= len(audio):
@@ -1057,7 +1052,7 @@ class MusicPlayer:
             
             audio_segment = audio[start_sample:end_sample]
             
-            # Fade in/out per evitare click
+            # Fade in/out to prevent clicks
             fade_samples = int(0.05 * sample_rate)  # 50ms fade
             if len(audio_segment) > fade_samples * 2:
                 # Fade in
@@ -1067,15 +1062,15 @@ class MusicPlayer:
                 fade_out = np.linspace(1, 0, fade_samples)
                 audio_segment[-fade_samples:] *= fade_out
             
-            print(f"  ▶️ Riproduzione: {duration:.1f}s da {start_time:.2f}s")
+            print(f"  ▶️ Playing: {duration:.1f}s from {start_time:.2f}s")
             
             self.is_playing = True
             self.stop_event.clear()
             
-            # Riproduzione
+            # Playback
             sd.play(audio_segment, sample_rate)
             
-            # Attendi fine riproduzione o stop
+            # Wait for end of playback or stop
             elapsed = 0
             while elapsed < duration and not self.stop_event.is_set():
                 time.sleep(0.1)
@@ -1083,14 +1078,14 @@ class MusicPlayer:
             
             sd.stop()
             self.is_playing = False
-            print("  ⏹️ Riproduzione terminata")
+            print("  ⏹️ Playback ended")
             
         except Exception as e:
-            print(f"  ❌ Errore riproduzione: {e}")
+            print(f"  ❌ Playback error: {e}")
             self.is_playing = False
     
     def stop_playback(self):
-        """Ferma la riproduzione corrente."""
+        """Stops current playback."""
         self.stop_event.set()
         if AUDIO_PLAYBACK_AVAILABLE:
             sd.stop()
@@ -1098,31 +1093,31 @@ class MusicPlayer:
     
     def play_closest(self, arousal: float, valence: float, bpm: float,
                     instrumentalness: float, electronicness: float):
-        """Trova e riproduce il brano più vicino ai parametri."""
-        # Ferma eventuale riproduzione in corso
+        """Finds and plays the track closest to parameters."""
+        # Stop any ongoing playback
         self.stop_playback()
         
-        print(f"\n🎯 Ricevuti parametri OSC:")
+        print(f"\n🎯 Received OSC parameters:")
         print(f"   Arousal={arousal:.2f}, Valence={valence:.2f}, BPM={bpm:.1f}")
         print(f"   Instrumentalness={instrumentalness:.2f}, Electronicness={electronicness:.2f}")
         
-        # Trova brano più vicino
+        # Find closest track
         closest = self.find_closest_track(arousal, valence, bpm, instrumentalness, electronicness)
         
         if closest is None:
-            print("❌ Nessun brano trovato nel dataset!")
+            print("❌ No track found in dataset!")
             return
         
-        print(f"\n🎵 Brano più vicino: {closest['filename']}")
+        print(f"\n🎵 Closest track: {closest['filename']}")
         print(f"   Distance: {self._calculate_distance(closest, {'arousal': arousal, 'valence': valence, 'bpm': bpm, 'instrumentalness': instrumentalness, 'electronicness': electronicness}):.3f}")
         print(f"   Track: arousal={closest.get('arousal', 0):.2f}, valence={closest.get('valence', 0):.2f}, bpm={closest.get('bpm', 0):.1f}")
         
-        # Trova primo onset
+        # Find first onset
         audio_path = closest.get('path', '')
         first_onset = self._find_first_onset(audio_path)
-        print(f"   Primo onset: {first_onset:.2f}s")
+        print(f"   First onset: {first_onset:.2f}s")
         
-        # Riproduci in un thread separato
+        # Play in a separate thread
         play_thread = threading.Thread(
             target=self._play_audio,
             args=(audio_path, first_onset, self.playback_duration)
@@ -1131,8 +1126,8 @@ class MusicPlayer:
         play_thread.start()
     
     def _osc_handler(self, address: str, *args):
-        """Handler per messaggi OSC."""
-        print(f"\n📨 Messaggio OSC ricevuto: {address}")
+        """Handler for OSC messages."""
+        print(f"\n📨 OSC message received: {address}")
         
         if len(args) >= 5:
             arousal = float(args[0])
@@ -1143,13 +1138,13 @@ class MusicPlayer:
 
             self.play_closest(arousal, valence, bpm, instrumentalness, electronicness)
         else:
-            print(f"⚠️ Parametri insufficienti. Ricevuti: {args}")
-            print("   Formato atteso: arousal valence bpm instrumentalness electronicness")
+            print(f"⚠️ Insufficient parameters. Received: {args}")
+            print("   Expected format: arousal valence bpm instrumentalness electronicness")
     
     def start_server(self, osc_address: str = "/music/play"):
-        """Avvia il server OSC."""
+        """Starts the OSC server."""
         if not OSC_AVAILABLE:
-            print("❌ python-osc non disponibile!")
+            print("❌ python-osc unavailable!")
             return
         
         # Setup dispatcher
@@ -1157,7 +1152,7 @@ class MusicPlayer:
         disp.map(osc_address, self._osc_handler)
         disp.set_default_handler(self._osc_handler)
         
-        # Crea server
+        # Create server
         self.server = osc_server.ThreadingOSCUDPServer(
             (self.osc_ip, self.osc_port), disp
         )
@@ -1165,26 +1160,26 @@ class MusicPlayer:
         print("\n" + "="*60)
         print("🎧 MUSIC PLAYER OSC SERVER")
         print("="*60)
-        print(f"   Indirizzo: {self.osc_ip}:{self.osc_port}")
-        print(f"   OSC Address: {osc_address}")
-        print(f"   Durata playback: {self.playback_duration}s")
-        print(f"   Brani disponibili: {len(self.tracks)}")
-        print("\n   Formato messaggio OSC:")
+        print(f"   Address: {self.osc_ip}:{self.osc_port}")
+        print(f"   OSC Route: {osc_address}")
+        print(f"   Playback duration: {self.playback_duration}s")
+        print(f"   Available tracks: {len(self.tracks)}")
+        print("\n   OSC Message Format:")
         print(f"   {osc_address} [arousal] [valence] [bpm] [instrumentalness] [electronicness]")
-        print("\n   Esempio (valori 0-1 tranne BPM):")
+        print("\n   Example (0-1 values except BPM):")
         print(f"   {osc_address} 0.7 0.3 120 0.8 0.5")
-        print("\n   Premi Ctrl+C per fermare il server")
+        print("\n   Press Ctrl+C to stop server")
         print("="*60 + "\n")
         
-        # Avvia server
+        # Start server
         try:
             self.server.serve_forever()
         except KeyboardInterrupt:
-            print("\n\n🛑 Server fermato.")
+            print("\n\n🛑 Server stopped.")
             self.stop_playback()
     
     def start_server_async(self, osc_address: str = "/music/play"):
-        """Avvia il server OSC in un thread separato."""
+        """Starts the OSC server in a separate thread."""
         self.server_thread = threading.Thread(
             target=self.start_server,
             args=(osc_address,)
@@ -1194,85 +1189,85 @@ class MusicPlayer:
         return self.server_thread
 
 
-# Esempio di utilizzo
+# Usage Example
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Music Analyzer & OSC Player")
     parser.add_argument('--server', action='store_true', 
-                       help='Avvia il server OSC per ricevere parametri e riprodurre musica')
+                        help='Starts OSC server to receive parameters and play music')
     parser.add_argument('--port', type=int, default=9000,
-                       help='Porta OSC (default: 9000)')
+                        help='OSC Port (default: 9000)')
     parser.add_argument('--address', type=str, default='/music/play',
-                       help='Indirizzo OSC (default: /music/play)')
+                        help='OSC Address (default: /music/play)')
     parser.add_argument('--duration', type=float, default=30.0,
-                       help='Durata riproduzione in secondi (default: 30)')
+                        help='Playback duration in seconds (default: 30)')
     parser.add_argument('--analyze-only', action='store_true',
-                       help='Solo analisi, senza avviare il server')
+                        help='Perform analysis only, without starting server')
     parser.add_argument('--clear-cache', action='store_true',
-                       help='Rimuove il file di cache prima dell\'analisi')
+                        help='Removes cache file before analysis')
     parser.add_argument('--audio-folder', type=str,
-                       help='Percorso della cartella audio da analizzare')
+                        help='Path to audio folder to analyze')
     
     args = parser.parse_args()
     
-    # Configura il percorso della cartella audio (dinamico rispetto al progetto)
+    # Configure audio folder path (dynamic relative to project)
     script_dir = Path(__file__).parent
     AUDIO_FOLDER = str((script_dir / "audio").resolve())
     
-    # Override da CLI se fornito
+    # Override from CLI if provided
     if args.audio_folder:
         AUDIO_FOLDER = args.audio_folder
     
-    # Crea l'analizzatore
+    # Create analyzer
     try:
         analyzer = MusicAnalyzer(
             audio_folder=AUDIO_FOLDER,
             cache_file="music_analysis_cache.json"
         )
         
-        # Rimuovi cache se richiesto
+        # Remove cache if requested
         if args.clear_cache:
             try:
                 if analyzer.cache_file.exists():
                     analyzer.cache_file.unlink()
-                    print(f"🗑️ Cache rimossa: {analyzer.cache_file}")
+                    print(f"🗑️ Cache removed: {analyzer.cache_file}")
                 else:
-                    print("ℹ️ Nessuna cache da rimuovere.")
+                    print("ℹ️ No cache to remove.")
             except Exception as e:
-                print(f"⚠️ Errore nella rimozione della cache: {e}")
+                print(f"⚠️ Error removing cache: {e}")
         
-        # Esegui analisi (o carica dalla cache se non è cambiato nulla)
+        # Run analysis (or load from cache if nothing changed)
         results = analyzer.analyze()
         
-        # Mostra risultati
+        # Show results
         print("\n" + "="*70)
-        print("📊 RISULTATI ANALISI")
+        print("📊 ANALYSIS RESULTS")
         print("="*70)
         
         for track in results.get('tracks', []):
             if track.get('analyzed'):
                 print(f"\n🎵 {track['filename']}")
                 key_info = f"{track.get('key', '?')} {track.get('scale', '?')}" if track.get('key') else "N/A"
-                print(f"   Tonalità: {key_info} (strength: {track.get('key_strength', 0):.2f})")
+                print(f"   Key: {key_info} (strength: {track.get('key_strength', 0):.2f})")
                 print(f"   BPM: {track['bpm']} (confidence: {track['beats_confidence']})")
-                print(f"   Energia: {track['energy']:.2f} | Arousal: {track['arousal']:.2f} | Valence: {track['valence']:.2f}")
+                print(f"   Energy: {track['energy']:.2f} | Arousal: {track['arousal']:.2f} | Valence: {track['valence']:.2f}")
                 print(f"   Danceability: {track['danceability']:.2f}")
                 print(f"   Mood: 😊 Happy={track['mood_happy']:.2f} | 😢 Sad={track['mood_sad']:.2f} | 😤 Aggr={track['mood_aggressive']:.2f} | 😌 Relax={track['mood_relaxed']:.2f}")
-                print(f"   Durata: {track['duration_seconds']}s")
+                print(f"   Duration: {track['duration_seconds']}s")
         
-        # Mostra summary
+        # Show summary
         if 'summary' in results:
             print("\n" + "="*70)
-            print("📈 STATISTICHE GENERALI")
+            print("📈 GENERAL STATISTICS")
             print("="*70)
             summary = results['summary']
-            print(f"   BPM medio: {summary.get('avg_bpm', 0)}")
-            print(f"   Range BPM: {summary.get('min_bpm', 0)} - {summary.get('max_bpm', 0)}")
-            print(f"   Energia media: {summary.get('avg_energy', 0):.2f}")
-            print(f"   Durata totale: {summary.get('total_duration_minutes', 0):.1f} minuti")
+            print(f"   Avg BPM: {summary.get('avg_bpm', 0)}")
+            print(f"   BPM Range: {summary.get('min_bpm', 0)} - {summary.get('max_bpm', 0)}")
+            print(f"   Avg Energy: {summary.get('avg_energy', 0):.2f}")
+            print(f"   Total Duration: {summary.get('total_duration_minutes', 0):.1f} minutes")
         
-        # Avvia server OSC se richiesto
+        # Start OSC server if requested
         if args.server and not args.analyze_only:
             player = MusicPlayer(
                 analyzer=analyzer,
@@ -1281,9 +1276,9 @@ if __name__ == "__main__":
             )
             player.start_server(osc_address=args.address)
         elif not args.analyze_only:
-            print("\n💡 Per avviare il server OSC usa: python music_score.py --server")
-            print("   Opzioni: --port 9000 --address /music/play --duration 30")
+            print("\n💡 To start the OSC server use: python music_score.py --server")
+            print("   Options: --port 9000 --address /music/play --duration 30")
         
     except FileNotFoundError as e:
-        print(f"❌ Errore: {e}")
-        print(f"   Crea la cartella 'audio' in: {AUDIO_FOLDER}")
+        print(f"❌ Error: {e}")
+        print(f"   Create 'audio' folder in: {AUDIO_FOLDER}")

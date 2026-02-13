@@ -8,7 +8,6 @@ Coordinates two independent processes:
 When BOTH processes complete, sends OSC "start" message to TouchDesigner.
 """
 
-import os
 import time
 from pathlib import Path
 

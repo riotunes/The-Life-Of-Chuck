@@ -19,16 +19,12 @@ if not os.environ.get("GEMINI_API_KEY"):
     sys.exit(1)
 
 # Import our modules (after loading env)
-from camera_capture import capture_face
 from face_aging import generate_age_progression
 from camera_to_uv import convert_images_to_uv
-from osc_sender import send_pipeline_complete, send_with_metadata, send_num_stages
 from process_coordinator import signal_pipeline_complete
 from shared_config import calculate_num_stages, get_age_increment
 import re
 import time
-import threading
-from pathlib import Path
 
 # Music integration
 MUSIC_SCORE_AVAILABLE = False
@@ -154,7 +150,7 @@ def _build_playlist(analyzer, music_params):
     )
 
     playlist = []
-    used_tracks = []  # Lista dei brani già selezionati (anti-ripetizione)
+    used_tracks = []  # list of filenames already used to avoid repetition
     
     for idx, params in enumerate(music_params):
         closest = player.find_closest_track(
@@ -163,11 +159,11 @@ def _build_playlist(analyzer, music_params):
             bpm=params['bpm'],
             instrumentalness=params['instrumentalness'],
             electronicness=params['electronicness'],
-            exclude_filenames=used_tracks  # Escludi brani già usati
+            exclude_filenames=used_tracks  # restraint to avoid repeating tracks across scenes
         )
         if closest:
             filename = closest.get('filename', '')
-            used_tracks.append(filename)  # Aggiungi ai brani usati
+            used_tracks.append(filename)  # add to used list to prevent future selection
             playlist.append({
                 'path': closest.get('path', ''),
                 'filename': filename,
@@ -183,10 +179,9 @@ def _build_playlist(analyzer, music_params):
 def _send_playlist_sequenced(playlist, ip="127.0.0.1", port=57120,
                              segment_dur=2.0, lead=1.0):
     """
-    Invia i path a SuperCollider in sequenza:
-    - primo subito
-    - poi uno ogni (segment_dur - lead) secondi (default 29s)
-    Processo bloccante: garantisce che tutti i messaggi vengano inviati prima di uscire.
+    send playlist to SuperCollider one track at a time, with a delay between each to allow for crossfading.
+    segment_dur is the total duration of each track segment (e.g., 30s), lead is how much before the end of the segment to send the next track (e.g., 1s before).
+    This allows SuperCollider to handle crossfading between tracks.
     """
     if not OSC_CLIENT_AVAILABLE:
         print("❌ python-osc non disponibile, impossibile inviare a SuperCollider.")
@@ -207,17 +202,16 @@ def _send_playlist_sequenced(playlist, ip="127.0.0.1", port=57120,
             if idx < len(playlist) - 1:
                 wait_time = max(1.0, segment_dur - lead)  # es. 29s
                 time.sleep(wait_time)
-        print("✅ Playlist inviata a SuperCollider (sequenziale).")
+        print("✅ Playlist sent to SuperCollider with sequencing.")
         return True
     except KeyboardInterrupt:
-        print("⏹️ Interrotto dall’utente.")
+        print("⏹️ interrupted by user, stopping playlist sending.")
         return False
 
 
 def start_music_integration():
     """
-    Seleziona i brani (in base ai parametri Gemini) e invia la playlist a SuperCollider.
-    Non riproduce audio in Python.
+    selects tracks based on Gemini-generated parameters and sends them to SuperCollider.
     """
     if not MUSIC_SCORE_AVAILABLE:
         print("\n⚠️ Music analyzer not available, skipping music integration")
@@ -230,22 +224,22 @@ def start_music_integration():
         print(f"⚠️ Audio folder not found: {audio_folder}")
         return
     
-    # 1) Leggi parametri musicali generati
+    # 1) Parse music parameters from Gemini-generated text files (or use defaults if not found)
     music_params = parse_music_params_from_gemini()
     
-    # 2) Analizza (o carica cache) prima di scegliere i brani
-    print("\n[MUSIC] Analisi/caching brani...")
+    # 2) Build playlist based on parameters, ensuring no track is repeated across scenes
+    print("\n[MUSIC] analysis/ cathing track...")
     analyzer = MusicAnalyzer(audio_folder)
     analyzer.analyze()
     
-    # 3) Costruisci playlist migliore per i parametri
-    print("[MUSIC] Selezione brani per le scene...")
+    # 3) build playlist with anti-repetition constraint and print selected tracks
+    print("[MUSIC] Selecting tracks based on parameters (with anti-repetition)...")
     playlist = _build_playlist(analyzer, music_params)
     if not playlist:
-        print("❌ Nessun brano selezionato, interruzione.")
+        print("❌ No tracks selected, skipping music sending.")
         return
     
-    print("[MUSIC] Invio playlist a SuperCollider (scaglionata)...")
+    print("[MUSIC] Sending playlist to SuperCollider...")
     _send_playlist_sequenced(
         playlist,
         ip="127.0.0.1",
@@ -253,7 +247,7 @@ def start_music_integration():
         segment_dur=2.0,
         lead=1.0
     )
-    print("🎵 Playlist pronta su SuperCollider (30s a traccia, crossfade gestito in SC).")
+    print("🎵 Playlist sent to SuperCollider!")
 
 
 def pre_analyze_music():

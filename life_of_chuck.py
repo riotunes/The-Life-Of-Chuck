@@ -1,6 +1,5 @@
-import cv2
+import cv2 
 import tkinter as tk
-from tkinter import messagebox
 from PIL import Image, ImageTk
 import os
 import sys
@@ -11,6 +10,7 @@ from google import genai
 from process_coordinator import init_flags, signal_gui_complete, wait_for_pipeline_only
 from shared_config import calculate_num_stages
 
+# --- CONFIGURATION ---
 GEMINI_API_KEY = "AIzaSyAusu4BKjrENlK83lvaPJ5ONrySOaliqo4" #MARIO API KEY
 #"AIzaSyANDLGaf8I-css3kLVj3fr_2TzNkB7OrMA" #RICCARDO API KEY
 
@@ -23,6 +23,10 @@ CENTER_Y = APP_HEIGHT // 2
 UI_CENTER_X = CENTER_X - int(APP_WIDTH * 0.10)
 
 class LifeOfChuckApp:
+    """
+    Main Application Controller: Manages navigation between pages, background 
+    threading for AI/Music analysis, and global state (user data, captured image).
+    """
     def __init__(self, root):
         self.root = root
         self.root.title("The Life of Chuck")
@@ -30,16 +34,18 @@ class LifeOfChuckApp:
         self.root.attributes("-fullscreen", True)
         self.root.configure(bg="black")
         
+        # Paths for background assets
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.bg_folder = os.path.abspath(os.path.join(script_dir, "bg_frames"))
-        
         self.bg_frames = []
         self.current_frame = 0
         self.load_background_frames()
 
+        # Shared resources
         self.vid = cv2.VideoCapture(0)
         self.captured_image = None
         
+        # UI Container: Grid system for overlapping pages
         self.container = tk.Frame(self.root, bg="black")
         self.container.pack(fill="both", expand=True)
         self.container.grid_rowconfigure(0, weight=1)
@@ -72,7 +78,6 @@ class LifeOfChuckApp:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE
                 )
-                
                 # Don't wait for completion, just let it run in background
                 print("✅ Music analysis started in background")
             except Exception as e:
@@ -81,6 +86,7 @@ class LifeOfChuckApp:
         threading.Thread(target=analyze, daemon=True).start()
 
     def load_background_frames(self):
+        """Pre-loads animation frames into memory for smooth transitions."""
         if os.path.exists(self.bg_folder):
             files = sorted([f for f in os.listdir(self.bg_folder) if f.endswith(('.png', '.jpg', '.jpeg'))])
             for f in files:
@@ -92,6 +98,7 @@ class LifeOfChuckApp:
                     continue
 
     def animate_background(self):
+        """Global animation loop: updates the background canvas of all active pages."""
         if self.bg_frames:
             next_img = self.bg_frames[self.current_frame]
             for page in self.pages.values():
@@ -100,6 +107,7 @@ class LifeOfChuckApp:
         self.root.after(30, self.animate_background)
 
     def show_page(self, page_name):
+        """Handles page transitions and triggers specific logic (e.g., webcam start)."""
         frame = self.pages[page_name]
         frame.tkraise()
         if page_name == "CameraPage":
@@ -108,6 +116,10 @@ class LifeOfChuckApp:
             frame.generate_future_timeline()
 
     def fetch_gemini_bio(self, callback):
+        """
+        Asynchronous AI Generation: Sends user data to Gemini to create a 
+        multi-stage future timeline with specific image and music prompts.
+        """
         def run():
             try:
                 # Setup target directory paths
@@ -140,10 +152,9 @@ class LifeOfChuckApp:
 
                 client = genai.Client(api_key=GEMINI_API_KEY)
 
-                # PROMPT: Focus su lunghezza minima e virgola dopo ogni parola + parametri musicali
                 prompt = f"""
-                Dati Utente: {data}
-                Età attuale: {current_age}
+                User Data: {data}
+                AGE: {current_age}
 
                 OBJECTIVE:
                 Generate exactly {num_stages} raw image prompts for a stream diffusion generative AI WITH MUSIC PARAMETERS.
@@ -189,7 +200,7 @@ class LifeOfChuckApp:
                 if response.text:
                     full_story = response.text
 
-                    # Pulizia file precedenti nel target_dir
+                    # Clean old futures texts
                     for f_old in os.listdir(target_dir):
                         if f_old.startswith("future_") and f_old.endswith(".txt"):
                             os.remove(os.path.join(target_dir, f_old))
@@ -236,10 +247,10 @@ class LifeOfChuckApp:
                     
                     msg = "Your journey is about to unfold."
                 else:
-                    raise Exception("Risposta AI vuota")
+                    raise Exception("No text response from Gemini.")
 
             except Exception as e:
-                print(f"Errore AI: {e}")
+                print(f"Error: {e}")
                 self.emergency_save()
                 msg = "Destiny generated (offline mode)."
             
@@ -253,24 +264,22 @@ class LifeOfChuckApp:
         os.makedirs(target_dir, exist_ok=True)
 
         backup = {
-            "future_age_40.txt": "Un periodo di grande successo.",
-            "future_age_60.txt": "La saggezza ti guida.",
-            "future_age_80.txt": "Circondato dall'affetto.",
-            "future_death.txt": "Un lascito di ispirazione."
+            "future_age_40.txt": "A new chapter begins, full of promise.",
+            "future_age_60.txt": "Wisdom surrounds you",
+            "future_age_80.txt": "Surrounded by love.",
+            "future_death.txt": "An inspiring legacy."
         }
+
         for name, text in backup.items():
             filepath = os.path.join(target_dir, name)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(text)
     
     def clean_old_data(self):
-        """
-        Pulisce tutti i dati della sessione precedente.
-        Chiamato quando si preme BEGIN per iniziare una nuova sessione.
-        """
+        """Resets the environment for a new user by deleting temporary session files."""
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # 1. Pulisci user_data.txt
+        # 1. clean user_data.txt
         user_data_path = os.path.join(script_dir, "user_data.txt")
         if os.path.exists(user_data_path):
             try:
@@ -278,7 +287,7 @@ class LifeOfChuckApp:
             except:
                 pass
         
-        # 2. Pulisci l'immagine catturata
+        # 2. clean captured image
         self.captured_image = None
         chuck_origin_path = os.path.join(script_dir, "chuck_origin.jpg")
         if os.path.exists(chuck_origin_path):
@@ -287,7 +296,7 @@ class LifeOfChuckApp:
             except:
                 pass
         
-        # 3. Pulisci cartelle di output (aged_outputs, uv_outputs, futures_texts, music_params)
+        # 3. clean output folders (aged_outputs, uv_outputs, futures_texts, music_params)
         folders_to_clean = ["aged_outputs", "uv_outputs", "futures_texts", "music_params"]
         for folder in folders_to_clean:
             folder_path = os.path.join(script_dir, folder)
@@ -300,22 +309,20 @@ class LifeOfChuckApp:
     
     def reset_app(self):
         """
-        Riavvia completamente l'applicazione senza chiudere la GUI.
-        Resetta tutte le pagine e torna alla StartPage.
-        I dati vengono puliti solo quando si preme BEGIN.
+        scheduled reset after the final stage: cleans all session data and returns to StartPage for a new user.
         """
-        # 1. Resetta tutte le pagine
+        # 1. reset all pages to initial state (e.g., stop webcam, clear entries)
         for page_name, page in self.pages.items():
             if hasattr(page, 'reset_page'):
                 page.reset_page()
         
-        # 2. Reinizializza i flag di coordinamento
+        # 2. reinitialize coordination flags for the next session
         init_flags()
         
-        # 3. Torna alla StartPage
+        # 3. back to start page
         self.show_page("StartPage")
 
-# --- STYLING (COSI' COME TI PIACE) ---
+# --- STYLING  ---
 TITLE_FONT = ("DejaVu Sans Mono", 48, "bold")
 ENTRY_FONT = ("DejaVu Sans Mono", 26, "normal")
 BUTTON_STYLE = {"font": ("DejaVu Sans Mono", 14, "bold"), "width": 28, "height": 2, "bg": "white", "fg": "black", "relief": "flat"}
@@ -347,7 +354,7 @@ class StartPage(PageWithBackground):
         self.canvas.create_window(UI_CENTER_X, int(APP_HEIGHT * 0.65), window=btn, anchor="center")
     
     def begin_journey(self):
-        """Pulisce i dati vecchi e inizia una nuova sessione."""
+        """clean old session data and navigate to CameraPage to start a new user session."""
         self.controller.clean_old_data()
         self.controller.show_page("CameraPage")
 
@@ -365,9 +372,9 @@ class CameraPage(PageWithBackground):
         self.btn_capture.grid(row=0, column=0)
 
     def reset_page(self):
-        """Resetta la pagina allo stato iniziale."""
+        """reset the camera page to initial state for a new session: stop preview, clear captured image, and show capture button."""
         self.is_previewing = False
-        # Rimuovi tutti i widget dal btn_frame e ricrea il bottone capture
+        # remove all widgets from btn_frame and show capture button again
         for widget in self.btn_frame.winfo_children():
             widget.destroy()
         self.btn_capture = tk.Button(self.btn_frame, text="CAPTURE THE PRESENT", **BUTTON_STYLE, command=self.capture_action)
@@ -475,11 +482,11 @@ class EndPage(PageWithBackground):
         self.music_ready = False
         self.music_process = None
         self.completion_message = None
-        # Rimuovi il bottone FINISH se esiste
+        # remove finish button if it exists
         if self.finish_button:
             self.finish_button.destroy()
             self.finish_button = None
-        # Resetta il testo dello status
+        # Reset status text
         self.canvas.itemconfig(self.status_tag, text="The architect is designing your tomorrow")
 
     def generate_future_timeline(self):
@@ -542,12 +549,12 @@ class EndPage(PageWithBackground):
         self.finish_button.place(x=UI_CENTER_X, y=int(APP_HEIGHT * 0.7), anchor="center")
 
     def finish_and_signal(self):
-        # Nascondi il bottone FINISH dopo che è stato premuto
+        # hide finish button immediately to prevent multiple clicks
         if self.finish_button:
             self.finish_button.destroy()
             self.finish_button = None
         
-        # Avvia integrazione musica (selezione + invio sequenziale a SC)
+        # Launch music integration (this will read the music parameters saved by Gemini and send to SuperCollider)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         main_script = os.path.join(script_dir, "main.py")
         try:
@@ -562,7 +569,7 @@ class EndPage(PageWithBackground):
         except Exception as e:
             print(f"⚠️ Could not start music integration: {e}")
 
-        # OSC verso TouchDesigner immediati
+        # OSC signal to TouchDesigner that the experience is complete and music can start (in case we want to sync something on TD side at this moment)
         osc_code = '''
 import time
 from pythonosc import udp_client
@@ -580,28 +587,28 @@ print("[OSC] Sent: /touchdesigner/start (0 and 1)")
             start_new_session=True
         )
 
-        # Segnala GUI completa ma NON chiude la finestra
+        # Signal to coordinator that GUI flow is complete (this will allow the next user session to start after the scheduled reset)
         signal_gui_complete()
 
-        # Leggi num_stages salvato (per consistenza con Gemini e aging)
+        # read num_stages from user_data.txt to calculate when to reset the app for the next user
         import re
         user_data_path = os.path.join(script_dir, "user_data.txt")
         try:
             with open(user_data_path, "r", encoding="utf-8") as f:
                 data = f.read()
-            # Prima cerca NUM_STAGES salvato
+            # first try to read NUM_STAGES directly (in case it was saved by the AgePage), if not present calculate it from AGE
             stages_match = re.search(r"NUM_STAGES: (\d+)", data)
             if stages_match:
                 num_stages = int(stages_match.group(1))
             else:
-                # Fallback: calcola dall'età
+                # Fallback: if NUM_STAGES not found, try to read AGE and calculate from it (this is for backward compatibility in case the AGE page didn't save NUM_STAGES)
                 age_match = re.search(r"AGE: (\d+)", data)
                 current_age = int(age_match.group(1)) if age_match else 30
                 num_stages = calculate_num_stages(current_age)
         except:
             num_stages = 5  # fallback
 
-        # Mostra messaggio e nascondi elementi, poi programma il reset dopo num_stages * 30 secondi
+        # show a message that the experience is complete and the app will reset soon
         wait_time_ms = num_stages * 30 * 1000  # millisecondi
         self.canvas.itemconfig(self.status_tag, text="")
         self.controller.root.after(wait_time_ms, self.controller.reset_app)

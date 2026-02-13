@@ -82,4 +82,8 @@ The installation operates through a coordinated pipeline of three main engines:
 
 We hope that this journey through the “multitudes” inhabiting your future will not be merely a technological curiosity, but a moment of genuine introspection. We hope you enjoy the experience and, above all, that you feel something: the weight of time, the joy of fulfilled dreams, or the melancholic beauty of change.
 
+---
+
+Authors: Riccardo Tocci, David Gadiaga, Mario Aucelli 
 *Created for the CPAC course 2026.*
+

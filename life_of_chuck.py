@@ -180,14 +180,14 @@ class LifeOfChuckApp:
                 MUSIC PARAMETERS (all values 0.0-1.0 except BPM which is 60-180):
                 - arousal: energy/activation level (0=calm, 1=intense)
                 - valence: positivity (0=sad/negative, 1=happy/positive), you can use 0.4-0.6 for neutral
-                - bpm: tempo in beats per minute (60-180)
+                - bpm: tempo in beats per minute (60-180) fixed in range [0,1] as bpm/180
                 - acousticness: presence of acoustic sounds (0=electronic, 1=acoustic)
                 - instrumentalness: presence of instrumental sounds (0=with vocals, 1=instrumental)
 
                 EXAMPLE OF DESIRED OUTPUT:
                 [AGE 42]
                 Glass walls. A heavy oak desk. The smell of expensive leather and stale coffee. Outside, the city is a grid of cold, indifferent lights.
-                MUSIC: 0.632,0.232,100.2,0.523,0.342
+                MUSIC: 0.632,0.232,0.875,0.523,0.342
 
                 """
 

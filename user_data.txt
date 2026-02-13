@@ -1,5 +1,5 @@
 AGE: 24
-NUM_STAGES: 7
+NUM_STAGES: 6
 NAME: Mario
-DREAM: Being the greatest plumber in the world
-BIO: I love peaches, I hate fire lizards turtles
+DREAM: I wish to be the greatest soundtrack composer in the world
+BIO: I love life and creativity and art

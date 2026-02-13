@@ -6,22 +6,20 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from pathlib import Path
 import os
-import sys
 
 class CanonicalFaceUVConverter:
     """
-    Convert face images to UV texture maps using MediaPipe's canonical face mesh 
-    and High-Quality Affine Warping.
+    Converts 2D facial images into UV texture maps by mapping detected landmarks 
+    to a 3D canonical face model using High-Quality Affine Warping.
     """
     
     def __init__(self, model_path="face_landmarker.task", obj_path="canonical_face_model.obj"):
-        """
-        Initialize MediaPipe and load the Reference OBJ.
-        """
+        """Initialize MediaPipe Landmarker and load the reference 3D mesh."""
         # 1. Load MediaPipe Face Landmarker
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"MediaPipe model not found: {model_path}")
 
+        # Initialize detector; blendshapes and transformation matrices are unused in this pipeline
         base_options = python.BaseOptions(model_asset_path=model_path)
         options = vision.FaceLandmarkerOptions(
             base_options=base_options,
@@ -36,8 +34,9 @@ class CanonicalFaceUVConverter:
             raise FileNotFoundError(f"OBJ file not found: {obj_path}")
             
         print(f"Loading reference mesh: {obj_path}...")
-        # process=False prevents trimesh from re-ordering vertices
-        self.mesh = trimesh.load(obj_path, process=False)
+        
+        # process=False ensures the vertex order remains constant to match MediaPipe indices        self.mesh = trimesh.load(obj_path, process=False)
+        self.mesh = trimesh.load(obj_path, process=False)   
         self.uvs = self.mesh.visual.uv
         self.faces = self.mesh.faces  # The triangles (e.g., [0, 1, 2])
 
@@ -215,7 +214,7 @@ def convert_images_to_uv(
             print(f"  Warning: No face detected in {image_file.name}")
             continue
         
-        # Save
+        # Save the file
         uv_filename = f"uv_{image_file.stem}.png"
         save_path = os.path.join(output_dir, uv_filename)
         cv2.imwrite(save_path, uv_texture)

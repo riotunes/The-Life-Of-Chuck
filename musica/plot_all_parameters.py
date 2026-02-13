@@ -1,7 +1,7 @@
 """Plot All Parameters 1D
 
-Legge la cache `audio/music_analysis_cache.json` e visualizza istogrammi 1D
-per TUTTI i parametri calcolati da music_score.py.
+Reads the cache `audio/music_analysis_cache.json` and visualizes 1D histograms
+for ALL parameters calculated by music_score.py.
 
 Output:
 - plots/all_parameters_1d.png
@@ -27,14 +27,16 @@ plt.rcParams['font.size'] = 8
 
 
 def load_tracks(cache_path: Path) -> list[dict]:
+    """Loads track data from the JSON cache file."""
     with cache_path.open('r', encoding='utf-8') as f:
         data = json.load(f)
+    # Only include tracks that have been successfully analyzed    
     tracks = [t for t in data.get('tracks', []) if t.get('analyzed', False)]
     return tracks
 
 
 def series(tracks: list[dict], key: str) -> np.ndarray:
-    """Estrae i valori per un campo specifico."""
+    """Extracts numeric values for a specific field/key."""
     vals = []
     for t in tracks:
         v = t.get(key, None)
@@ -61,15 +63,15 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not cache_path.exists():
-        raise FileNotFoundError(f'Cache non trovata: {cache_path}')
+        raise FileNotFoundError(f'Cache not found: {cache_path}')
 
     tracks = load_tracks(cache_path)
     if not tracks:
-        raise RuntimeError('Nessuna traccia analizzata trovata nella cache')
+        raise RuntimeError('No analyzed tracks found in cache')
 
-    print(f"📊 Caricati {len(tracks)} brani dalla cache")
+    print(f"📊 loaded {len(tracks)} tracks from cache")
 
-    # Lista di tutti i parametri da plottare (raggruppati per categoria)
+   # List of all parameters to plot (grouped by category)
     parameters = [
         # Valence components
         ('valence_mode', 'Valence Mode (min/maj)', (0, 1)),
@@ -102,7 +104,7 @@ def main() -> None:
         ('key_strength', 'Key Strength', (0, 1)),
     ]
 
-    # Calcola layout griglia
+    # Calculate grid layout
     n_params = len(parameters)
     n_cols = 4
     n_rows = (n_params + n_cols - 1) // n_cols
@@ -119,18 +121,19 @@ def main() -> None:
             ax.set_visible(True)
             continue
         
-        # Calcola statistiche
+        # Calcolate statistics
         min_val, max_val = values.min(), values.max()
         mean_val, std_val = values.mean(), values.std()
         
         # Plot istogramma
+        # Assign color based on category keywords
         color = 'cyan' if 'valence' in key else ('lime' if 'mood' in key else ('orange' if key in ['energy', 'arousal'] else 'magenta'))
         ax.hist(values, bins=args.bins, color=color, alpha=0.85, edgecolor='white', linewidth=0.3)
         
-        # Linea media
+        # Mean line
         ax.axvline(mean_val, color='yellow', linestyle='--', linewidth=1.5, label=f'mean={mean_val:.3f}')
         
-        # Titolo con statistiche
+        # Title with stats
         ax.set_title(f'{title}\nmin={min_val:.3f}, max={max_val:.3f}, μ={mean_val:.3f}, σ={std_val:.3f}')
         
         if xlim:
@@ -139,7 +142,7 @@ def main() -> None:
         ax.grid(alpha=0.2)
         ax.set_ylabel('Count')
 
-    # Nascondi assi vuoti
+    # Hide any unused subplots
     for j in range(i + 1, len(axes)):
         axes[j].set_visible(False)
 
@@ -148,7 +151,7 @@ def main() -> None:
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.show()
 
-    print(f'✅ Salvato: {out_path}')
+    print(f'✅ Saved: {out_path}')
 
 
 if __name__ == '__main__':

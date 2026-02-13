@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from PIL import Image
+from shared_config import calculate_num_stages, get_age_increment
 
 # Load environment variables
 load_dotenv()
@@ -182,22 +183,31 @@ if __name__ == "__main__":
         user_data_path = os.path.join(script_dir, 'user_data.txt')
         with open(user_data_path, 'r') as f:
             content = f.read().strip()
-        current_age = int(content.split(':')[1].strip())
-    except ValueError:
-        print("Invalid age entered")
+        for line in content.split('\n'):
+            if line.startswith('AGE:'):
+                current_age = int(line.split(':')[1].strip())
+                break
+        else:
+            raise ValueError("AGE line not found")
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Invalid age or file not found: {e}")
         sys.exit(1)
     
+    age_increment = get_age_increment()
+    num_stages = calculate_num_stages(current_age)
+
     print(f"\nUsing image: {test_image}")
-    print(f"Will generate ages: {current_age + 10}, {current_age + 20}, {current_age + 30}, {current_age + 40}, {current_age + 50}")
+    print(f"Age-based generation: {num_stages} stages for age {current_age}")
+    print(f"Will generate ages: {', '.join(str(current_age + (i * age_increment)) for i in range(1, num_stages + 1))}")
     print("(Each stage builds on the previous one)")
     print()
-    
+
     # Run the age progression
     results = generate_age_progression(
         input_image_path=test_image,
         current_age=current_age,
-        age_increment=10,
-        num_stages=5
+        age_increment=age_increment,
+        num_stages=num_stages
     )
     
     print("\nGenerated images:")

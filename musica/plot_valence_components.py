@@ -1,7 +1,7 @@
 """Plot Valence Components
 
-Legge la cache `audio/music_analysis_cache.json` e visualizza SOLO i componenti che
-contribuiscono alla valence, oltre alla valence finale.
+Reads the cache `audio/music_analysis_cache.json` and visualizes ONLY the components
+contributing to valence, in addition to the final valence score.
 
 Output:
 - plots/valence_components.png
@@ -21,28 +21,28 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def ammorbidisci_distribuzione(dati: np.ndarray, intensita: float = 0.5) -> np.ndarray:
+def smooth_distribution(data: np.ndarray, intensity: float = 0.5) -> np.ndarray:
     """
-    Rende i dati più uniformi preservando parzialmente la forma originale.
+    Makes the data more uniform while partially preserving the original shape.
     
     Args:
-        dati: array numpy dei valori.
-        intensita: float tra 0.0 (originale) e 1.0 (uniforme).
+        data: numpy array of values.
+        intensity: float between 0.0 (original) and 1.0 (uniform).
     
     Returns:
-        Array con distribuzione smussata (ordinato).
+        Array with smoothed distribution (sorted).
     """
-    # 1. Ordina i dati
-    indici_ordinamento = np.argsort(dati)
-    dati_ordinati = dati[indici_ordinamento]
+    # 1. Sort the data
+    sort_indices = np.argsort(data)
+    sorted_data = data[sort_indices]
     
-    # 2. Crea il target uniforme (linea retta dal min al max)
-    target_uniforme = np.linspace(dati_ordinati.min(), dati_ordinati.max(), len(dati))
+    # 2. Create the uniform target (straight line from min to max)
+    uniform_target = np.linspace(sorted_data.min(), sorted_data.max(), len(data))
     
-    # 3. Fai la media pesata
-    nuovi_dati_ordinati = (1 - intensita) * dati_ordinati + intensita * target_uniforme
+    # 3. Perform weighted average
+    new_sorted_data = (1 - intensity) * sorted_data + intensity * uniform_target
     
-    return nuovi_dati_ordinati
+    return new_sorted_data
 
 
 plt.style.use('dark_background')
@@ -51,13 +51,16 @@ plt.rcParams['font.size'] = 10
 
 
 def load_tracks(cache_path: Path) -> list[dict]:
+    """Loads track data from the JSON cache file."""
     with cache_path.open('r', encoding='utf-8') as f:
         data = json.load(f)
+    # Only include tracks that have been successfully analyzed
     tracks = [t for t in data.get('tracks', []) if t.get('analyzed', False)]
     return tracks
 
 
 def series(tracks: list[dict], key: str, *, clip01: bool = True) -> np.ndarray:
+    """Extracts numeric values for a specific field/key."""
     vals = []
     for t in tracks:
         v = t.get(key, None)
@@ -74,7 +77,7 @@ def series(tracks: list[dict], key: str, *, clip01: bool = True) -> np.ndarray:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Plot dei componenti della valence')
+    parser = argparse.ArgumentParser(description='Plot valence components')
     parser.add_argument('--cache', type=str, default='audio/music_analysis_cache.json')
     parser.add_argument('--out', type=str, default='plots/valence_components.png')
     parser.add_argument('--bins', type=int, default=30)
@@ -86,13 +89,13 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not cache_path.exists():
-        raise FileNotFoundError(f'Cache non trovata: {cache_path}')
+        raise FileNotFoundError(f'Cache not found: {cache_path}')
 
     tracks = load_tracks(cache_path)
     if not tracks:
-        raise RuntimeError('Nessuna traccia analizzata trovata nella cache')
+        raise RuntimeError('No analyzed tracks found in the cache')
 
-    # Componenti salvati da music_score.py
+    # Components saved by music_score.py
     mode = series(tracks, 'valence_mode')
     brightness = series(tracks, 'valence_brightness')
     dance = series(tracks, 'valence_dance')
@@ -100,16 +103,16 @@ def main() -> None:
     pre = series(tracks, 'valence_pre_penalty')
     final = series(tracks, 'valence')
 
-    # Applica smoothing (bending) alla distribuzione del mode min/maj
-    # intensita=0.5 -> 50% originale, 50% uniforme
-    mode_smoothed = ammorbidisci_distribuzione(mode, intensita=0.5)
+    # Apply smoothing (bending) to the min/maj mode distribution
+    # intensity=0.5 -> 50% original, 50% uniform
+    mode_smoothed = smooth_distribution(mode, intensity=0.5)
 
     missing_any = any(x.size == 0 for x in (mode, brightness, dance, penalty, pre, final))
     if missing_any:
         raise RuntimeError(
-            'Componenti valence mancanti nella cache. Rigenera la cache con:\n'
+            'Valence components missing from cache. Regenerate the cache with:\n'
             '  python music_score.py --analyze-only --clear-cache\n'
-            'poi rilancia questo script.'
+            'then rerun this script.'
         )
 
     fig, axes = plt.subplots(2, 3)
@@ -135,7 +138,7 @@ def main() -> None:
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.show()
 
-    print(f'✅ Salvato: {out_path}')
+    print(f'✅ Saved: {out_path}')
 
 
 if __name__ == '__main__':

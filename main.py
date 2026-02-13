@@ -18,23 +18,32 @@ if not os.environ.get("GEMINI_API_KEY"):
     print()
     sys.exit(1)
 
-# Import our modules (after loading env)
-from face_aging import generate_age_progression
-from camera_to_uv import convert_images_to_uv
+# Import lightweight/shared modules (after loading env)
 from process_coordinator import signal_pipeline_complete
 from shared_config import calculate_num_stages, get_age_increment
 import re
 import time
 
-# Music integration
-MUSIC_SCORE_AVAILABLE = False
-try:
-    sys.path.append(os.path.join(os.path.dirname(__file__), "musica"))
-    from musica.music_score import MusicAnalyzer, MusicPlayer
-    MUSIC_SCORE_AVAILABLE = True
-except ImportError as e:
-    print(f"Warning: music_score not available: {e}")
-    MUSIC_SCORE_AVAILABLE = False
+# Music integration — lazy import to avoid loading essentia (and its
+# bundled libSDL2) in the same process as cv2.
+_music_modules = {}  # cache for lazy-loaded MusicAnalyzer / MusicPlayer
+
+def _load_music_modules():
+    """Lazy-import music_score. Returns True if available."""
+    if 'available' in _music_modules:
+        return _music_modules['available']
+    try:
+        musica_dir = os.path.join(os.path.dirname(__file__), "musica")
+        if musica_dir not in sys.path:
+            sys.path.append(musica_dir)
+        from musica.music_score import MusicAnalyzer, MusicPlayer
+        _music_modules['MusicAnalyzer'] = MusicAnalyzer
+        _music_modules['MusicPlayer'] = MusicPlayer
+        _music_modules['available'] = True
+    except ImportError as e:
+        print(f"Warning: music_score not available: {e}")
+        _music_modules['available'] = False
+    return _music_modules['available']
 
 # OSC client for SuperCollider
 try:
@@ -142,6 +151,7 @@ def _build_playlist(analyzer, music_params):
     Ritorna una lista di dict con path e filename.
     Usa vincolo anti-ripetizione: ogni brano può essere scelto solo una volta.
     """
+    MusicPlayer = _music_modules['MusicPlayer']
     player = MusicPlayer(
         analyzer=analyzer,
         osc_ip="0.0.0.0",
@@ -213,9 +223,11 @@ def start_music_integration():
     """
     selects tracks based on Gemini-generated parameters and sends them to SuperCollider.
     """
-    if not MUSIC_SCORE_AVAILABLE:
+    if not _load_music_modules():
         print("\n⚠️ Music analyzer not available, skipping music integration")
         return
+
+    MusicAnalyzer = _music_modules['MusicAnalyzer']
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     audio_folder = os.path.join(script_dir, "musica", "audio")
@@ -252,10 +264,12 @@ def start_music_integration():
 
 def pre_analyze_music():
     """Pre-analyze music files at startup to build cache."""
-    if not MUSIC_SCORE_AVAILABLE:
+    if not _load_music_modules():
         print("\n⚠️ Music analyzer not available")
         return
     
+    MusicAnalyzer = _music_modules['MusicAnalyzer']
+
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         audio_folder = os.path.join(script_dir, "musica", "audio")
@@ -276,6 +290,8 @@ def pre_analyze_music():
 
 def run_pipeline():
     """Run the complete face aging pipeline."""
+    from face_aging import generate_age_progression
+    from camera_to_uv import convert_images_to_uv
     
     print("=" * 50)
     print("   LIFE OF CHUCK - AGING PIPELINE")

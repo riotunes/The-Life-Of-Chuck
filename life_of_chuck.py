@@ -148,7 +148,7 @@ class LifeOfChuckApp:
                     with open(user_data_path, "a", encoding="utf-8") as f_stages:
                         f_stages.write(f"NUM_STAGES: {num_stages}\n")
                 
-                num_age_blocks = num_stages  # All blocks represent future ages, last one is DEATH
+                num_age_blocks = num_stages - 1  # All blocks represent future ages, last one is DEATH
 
                 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -161,7 +161,7 @@ class LifeOfChuckApp:
                 JUST SENTENCES
 
                 STRUCTURE:
-                - Exactly {num_stages} blocks: [AGE X] ({num_age_blocks - 1} random ages) and [DEATH].
+                - Exactly {num_stages} blocks: [AGE X] ({num_age_blocks} random ages) and [DEATH].
                 - start from the current age, never go below it, each step is more or less 10 years older.
                 - Each block MUST have TWO parts: IMAGE PROMPT and MUSIC PARAMETERS
 
@@ -178,11 +178,11 @@ class LifeOfChuckApp:
                 10. MUSIC: After image prompt, add a line with MUSIC: arousal,valence,bpm, acousticness, instrumentalness
 
                 MUSIC PARAMETERS (all values 0.0-1.0 except BPM which is 60-180):
-                - arousal: energy/activation level (0=calm, 1=intense)
-                - valence: positivity (0=sad/negative, 1=happy/positive), you can use 0.4-0.6 for neutral
-                - bpm: tempo in beats per minute (60-180) fixed in range [0,1] as bpm/180
-                - acousticness: presence of acoustic sounds (0=electronic, 1=acoustic)
-                - instrumentalness: presence of instrumental sounds (0=with vocals, 1=instrumental)
+                - arousal: energy/activation level (0=calm, 1=intense), relative to user's current age (e.g., 0.5 could be neutral, 0.7 more energetic than current, 0.3 more calm)
+                - valence: positivity (0=sad/negative, 1=happy/positive), you can use 0.4-0.6 for neutral, relative to user's current age and dreams (e.g., 0.8 for a very positive future, 0.2 for a more challenging one)
+                - bpm: tempo in beats per minute (60-180) fixed in range [0,1] as (bpm-min)/(max-min), relative to user's current age and vivacity (e.g., 0.5 for 120bpm, 0.8 for 156bpm)
+                - acousticness: presence of acoustic sounds (0=electronic, 1=acoustic), relative to user's current context (0.2 more city and technology, 0.8 more nature and unplugged)
+                - instrumentalness: presence of instrumental sounds (0=with vocals, 1=instrumental), relative to user's social context and dreams (e.g., 0.7 for a more introspective and solitary future, 0.3 for a more social and outgoing one)
 
                 EXAMPLE OF DESIRED OUTPUT:
                 [AGE 42]

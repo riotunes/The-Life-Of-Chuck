@@ -1,7 +1,7 @@
 # The Life of Chuck: Multimodal Aging Installation
 
 <p align="center">
-  <img src="LIFE%20OF%20CHUCK.png" width="800">
+  <img src="images_presentation/LIFE%20OF%20CHUCK.png" width="800">
 </p>
 
 ## Project Overview

@@ -21,7 +21,7 @@ The project is built on a few core provocations:
 ## System Architecture
 The installation operates through a coordinated pipeline of three main engines:
 
-1.  **Python Backend:** Handles the GUI workflow, AI text generation (**Gemini 2.0 Flash**), progressive face aging (**Gemini 3 Pro Image**), and audio feature analysis.
+1.  **Python Backend:** Handles the GUI workflow, AI text generation (**gemini-3-flash-preview**), progressive face aging (**Gemini 3 Pro Image**), and audio feature analysis.
 2.  **Audio Playback Layer:** A **SuperCollider** engine (`player_crossfade.scd`) that manages real-time audio crossfades and queue management based on emotional track matching.
 3.  **Visualization Layer:** A **TouchDesigner** environment that renders 3D face meshes using generated UV textures, synchronized with AI narratives and audio.
 
